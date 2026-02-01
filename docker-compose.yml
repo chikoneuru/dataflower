@@ -1,0 +1,120 @@
+version: '3.8'
+
+services:
+  # Redis for state management
+  redis:
+    image: redis:7-alpine
+    container_name: dataflower-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    command: redis-server --appendonly yes
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  # MongoDB for persistent storage (optional)
+  mongodb:
+    image: mongo:6.0
+    container_name: dataflower-mongodb
+    ports:
+      - "27017:27017"
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: dataflower
+      MONGO_INITDB_ROOT_PASSWORD: dataflower123
+      MONGO_INITDB_DATABASE: workflows
+    volumes:
+      - mongo_data:/data/db
+    healthcheck:
+      test: echo 'db.runCommand("ping").ok' | mongosh localhost:27017/test --quiet
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Prometheus for metrics
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: dataflower-prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./configs/prometheus.yml:/etc/prometheus/prometheus.yml
+      - prometheus_data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+    depends_on:
+      - dataflower
+
+  # Grafana for visualization
+  grafana:
+    image: grafana/grafana:latest
+    container_name: dataflower-grafana
+    ports:
+      - "3000:3000"
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: admin
+      GF_INSTALL_PLUGINS: redis-datasource
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./configs/grafana/dashboards:/etc/grafana/provisioning/dashboards
+      - ./configs/grafana/datasources:/etc/grafana/provisioning/datasources
+    depends_on:
+      - prometheus
+
+  # DataFlower main application
+  dataflower:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: dataflower-app
+    environment:
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      MONGODB_HOST: mongodb
+      MONGODB_PORT: 27017
+      MONGODB_USER: dataflower
+      MONGODB_PASSWORD: dataflower123
+      PROMETHEUS_PORT: 8000
+    volumes:
+      - ./results:/app/results
+      - ./checkpoints:/app/checkpoints
+      - ./configs:/app/configs
+      - ./data:/app/data
+    ports:
+      - "8000:8000"  # Prometheus metrics
+      - "8080:8080"  # API (if added)
+    depends_on:
+      redis:
+        condition: service_healthy
+      mongodb:
+        condition: service_healthy
+    command: >
+      sh -c "
+        echo 'Waiting for services to be ready...' &&
+        sleep 5 &&
+        python run_all_experiments.py --config configs/experiment_config.yaml
+      "
+
+  # Jupyter notebook for interactive analysis
+  jupyter:
+    image: jupyter/scipy-notebook:latest
+    container_name: dataflower-jupyter
+    ports:
+      - "8888:8888"
+    environment:
+      JUPYTER_ENABLE_LAB: "yes"
+    volumes:
+      - ./:/home/jovyan/work
+      - ./results:/home/jovyan/results
+    command: start-notebook.sh --NotebookApp.token='' --NotebookApp.password=''
+
+volumes:
+  redis_data:
+  mongo_data:
+  prometheus_data:
+  grafana_data:

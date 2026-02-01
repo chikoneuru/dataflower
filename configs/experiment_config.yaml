@@ -1,0 +1,101 @@
+# DataFlower Experiment Configuration
+# Adjust these parameters to customize experiments
+
+performance:
+  throughput:
+    enabled: true
+    num_workflows: 40
+    workflow_sizes: [10, 20, 30, 50]
+    platforms: ['local']  # Can add 'aws_lambda', 'kubernetes'
+  
+  latency:
+    enabled: true
+    num_iterations: 30
+    workflow_types: ['linear', 'parallel', 'dag', 'mapreduce']
+  
+  resource_efficiency:
+    enabled: true
+    num_workflows: 25
+    resource_configs:
+      - cpu_cores: 4
+        memory_gb: 8
+      - cpu_cores: 8
+        memory_gb: 16
+      - cpu_cores: 16
+        memory_gb: 32
+      - cpu_cores: 32
+        memory_gb: 64
+
+scalability:
+  workflow_scalability:
+    enabled: true
+    workflow_counts: [10, 25, 50, 100, 200]
+    task_size: 20
+  
+  task_scalability:
+    enabled: true
+    task_counts: [10, 25, 50, 100, 200, 500]
+    num_workflows: 10
+  
+  resource_scalability:
+    enabled: true
+    resource_multipliers: [1, 2, 4, 8, 16]
+    workload_size: 75
+  
+  concurrency_scalability:
+    enabled: true
+    concurrency_levels: [1, 5, 10, 25, 50, 100]
+    total_workflows: 150
+
+fault_tolerance:
+  task_failure:
+    enabled: true
+    failure_rates: [0.0, 0.05, 0.1, 0.15, 0.2, 0.3]
+    num_workflows: 20
+    max_retries: 3
+  
+  timeout:
+    enabled: true
+    timeout_rates: [0.0, 0.05, 0.1, 0.15, 0.2]
+    num_workflows: 20
+    timeout_duration: 5.0
+  
+  checkpoint_recovery:
+    enabled: true
+    checkpoint_intervals: [5, 10, 15, 20, 30]
+    failure_probability: 0.1
+    num_workflows: 15
+  
+  cascading_failure:
+    enabled: true
+    initial_failure_points: [1, 2, 3, 5, 7]
+    propagation_probability: 0.3
+    num_workflows: 15
+
+comparison:
+  system_comparison:
+    enabled: true
+    workflow_types: ['linear', 'parallel', 'dag', 'mapreduce']
+    workflow_sizes: [20, 50, 100]
+    num_iterations: 10
+  
+  scheduler_comparison:
+    enabled: true
+    strategies: ['fifo', 'priority', 'sjf', 'cost_optimized', 'deadline_aware']
+    workload_patterns: ['uniform', 'bursty', 'mixed']
+    num_workflows: 50
+
+# System configuration
+system:
+  redis:
+    host: 'localhost'
+    port: 6379
+    db: 0
+  
+  monitoring:
+    prometheus_port: 8000
+    metrics_interval: 5  # seconds
+  
+  logging:
+    level: 'INFO'
+    file: 'experiments.log'

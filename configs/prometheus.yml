@@ -1,0 +1,25 @@
+# Prometheus configuration for DataFlower monitoring
+
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  - job_name: 'dataflower'
+    static_configs:
+      - targets: ['dataflower:8000']
+        labels:
+          service: 'dataflower'
+          environment: 'experiments'
+  
+  - job_name: 'redis'
+    static_configs:
+      - targets: ['redis:6379']
+        labels:
+          service: 'redis'
+  
+  - job_name: 'node'
+    static_configs:
+      - targets: ['localhost:9100']
+        labels:
+          service: 'node-exporter'
