@@ -1,0 +1,81 @@
+{
+  "name": "simple",
+  "description": "Configuration for actual components with simple algorithms (random, round-robin).",
+  "enable_logging": true,
+  "log_level": "DEBUG",
+  "enable_metrics": true,
+
+  "remote_storage": {
+    "type": "minio",
+    "minio_host": "minio",
+    "minio_port": 9000,
+    "access_key": "dataflower",
+    "secret_key": "dataflower123",
+    "bucket_name": "dataflower-storage"
+  },
+  "data_locality": {
+    "cache_dir": "./tmp/cache",
+    "temp_dir": "./tmp/data",
+    "max_cache_items": 1000,
+    "max_age_hours": 24
+  },
+
+  "cost_models": {
+    "algorithm": "mock",
+    "base_cold_start": 2.0,
+    "congestion_factor": 1.2,
+    "cpu_interference_factor": 0.5,
+    "memory_penalty_factor": 1.0,
+    "enable_caching": true,
+    "cache_size": 1000
+  },
+  "bottleneck_identifier": {
+    "algorithm": "simple_random",
+    "compute_threshold": 0.8,
+    "transfer_threshold": 0.8,
+    "bottleneck_weights": {
+      "no_bottleneck": {
+        "alpha": 0.5,
+        "beta": 0.3,
+        "gamma": 0.1,
+        "delta": 0.1
+      },
+      "compute_bottleneck": {
+        "alpha": 0.3,
+        "beta": 0.2,
+        "gamma": 0.1,
+        "delta": 0.4
+      },
+      "transfer_bottleneck": {
+        "alpha": 0.2,
+        "beta": 0.5,
+        "gamma": 0.1,
+        "delta": 0.2
+      }
+    }
+  },
+  "scheduling": {
+    "algorithm": "simple_random_greedy",
+    "enable_priority_queue": true,
+    "max_retries": 3,
+    "locality_bonus": 100.0,
+    "load_balance_penalty": 0.1,
+    "enable_dynamic_switching": false
+  },
+  "optimization": {
+    "algorithm": "mock",
+    "max_iterations": 100,
+    "time_limit": 5.0,
+    "initial_temp": 100.0,
+    "cooling_rate": 0.95,
+    "final_temp": 0.1,
+    "population_size": 50,
+    "mutation_rate": 0.1,
+    "crossover_rate": 0.8,
+    "enable_parallel": false
+  },
+  "enable_logging": true,
+  "log_level": "DEBUG",
+  "enable_metrics": true,
+  "metrics_interval": 1.0
+}

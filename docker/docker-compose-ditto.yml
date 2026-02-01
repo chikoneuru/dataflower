@@ -1,0 +1,778 @@
+services:
+  redis:
+    image: redis:7-alpine
+    container_name: dataflower_redis_ditto
+    ports:
+      - "6380:6379"
+    restart: unless-stopped
+
+  # ===== NODE 1: HIGH-PERFORMANCE NODE =====
+  # 6 workers for high-resource functions (Target: 11.75 CPU cores, 12.0 GB memory)
+  
+  ditto-worker-node1-1:
+    image: dataflower/worker:latest
+    container_name: ditto-worker-node1-1
+    labels:
+      - dataflower-type=generic-worker
+      - dataflower-node=node1
+      - dataflower-scheduler=ditto
+    environment:
+      - WORKER_ID=worker-node1-1
+      - NODE_ID=node1
+      - PORT=5000
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+    ports:
+      - "5001:5000"
+    volumes:
+      - ../functions:/app/functions:ro
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 2G
+        reservations:
+          cpus: '1.0'
+          memory: 1G
+    depends_on:
+      - redis
+    restart: unless-stopped
+
+  ditto-worker-node1-2:
+    image: dataflower/worker:latest
+    container_name: ditto-worker-node1-2
+    labels:
+      - dataflower-type=generic-worker
+      - dataflower-node=node1
+      - dataflower-scheduler=ditto
+    environment:
+      - WORKER_ID=worker-node1-2
+      - NODE_ID=node1
+      - PORT=5000
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+    ports:
+      - "5002:5000"
+    volumes:
+      - ../functions:/app/functions:ro
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 2G
+        reservations:
+          cpus: '1.0'
+          memory: 1G
+    depends_on:
+      - redis
+    restart: unless-stopped
+
+  ditto-worker-node1-3:
+    image: dataflower/worker:latest
+    container_name: ditto-worker-node1-3
+    labels:
+      - dataflower-type=generic-worker
+      - dataflower-node=node1
+      - dataflower-scheduler=ditto
+    environment:
+      - WORKER_ID=worker-node1-3
+      - NODE_ID=node1
+      - PORT=5000
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+    ports:
+      - "5003:5000"
+    volumes:
+      - ../functions:/app/functions:ro
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 2G
+        reservations:
+          cpus: '1.0'
+          memory: 1G
+    depends_on:
+      - redis
+    restart: unless-stopped
+
+  ditto-worker-node1-4:
+    image: dataflower/worker:latest
+    container_name: ditto-worker-node1-4
+    labels:
+      - dataflower-type=generic-worker
+      - dataflower-node=node1
+      - dataflower-scheduler=ditto
+    environment:
+      - WORKER_ID=worker-node1-4
+      - NODE_ID=node1
+      - PORT=5000
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+    ports:
+      - "5012:5000"
+    volumes:
+      - ../functions:/app/functions:ro
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 2G
+        reservations:
+          cpus: '1.0'
+          memory: 1G
+    depends_on:
+      - redis
+    restart: unless-stopped
+
+  ditto-worker-node1-5:
+    image: dataflower/worker:latest
+    container_name: ditto-worker-node1-5
+    labels:
+      - dataflower-type=generic-worker
+      - dataflower-node=node1
+      - dataflower-scheduler=ditto
+    environment:
+      - WORKER_ID=worker-node1-5
+      - NODE_ID=node1
+      - PORT=5000
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+    ports:
+      - "5013:5000"
+    volumes:
+      - ../functions:/app/functions:ro
+    deploy:
+      resources:
+        limits:
+          cpus: '1.75'
+          memory: 2G
+        reservations:
+          cpus: '0.875'
+          memory: 1G
+    depends_on:
+      - redis
+    restart: unless-stopped
+
+  ditto-worker-node1-6:
+    image: dataflower/worker:latest
+    container_name: ditto-worker-node1-6
+    labels:
+      - dataflower-type=generic-worker
+      - dataflower-node=node1
+      - dataflower-scheduler=ditto
+    environment:
+      - WORKER_ID=worker-node1-6
+      - NODE_ID=node1
+      - PORT=5000
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+    ports:
+      - "5014:5000"
+    volumes:
+      - ../functions:/app/functions:ro
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 2G
+        reservations:
+          cpus: '1.0'
+          memory: 1G
+    depends_on:
+      - redis
+    restart: unless-stopped
+
+  # ===== NODE 2: BALANCED NODE =====
+  # 5 workers for balanced resource allocation (Target: 8.0 CPU cores, 8.0 GB memory)
+  
+  ditto-worker-node2-1:
+    image: dataflower/worker:latest
+    container_name: ditto-worker-node2-1
+    labels:
+      - dataflower-type=generic-worker
+      - dataflower-node=node2
+      - dataflower-scheduler=ditto
+    environment:
+      - WORKER_ID=worker-node2-1
+      - NODE_ID=node2
+      - PORT=5000
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+    ports:
+      - "5004:5000"
+    volumes:
+      - ../functions:/app/functions:ro
+    deploy:
+      resources:
+        limits:
+          cpus: '1.6'
+          memory: 1.6G
+        reservations:
+          cpus: '0.8'
+          memory: 800M
+    depends_on:
+      - redis
+    restart: unless-stopped
+
+  ditto-worker-node2-2:
+    image: dataflower/worker:latest
+    container_name: ditto-worker-node2-2
+    labels:
+      - dataflower-type=generic-worker
+      - dataflower-node=node2
+      - dataflower-scheduler=ditto
+    environment:
+      - WORKER_ID=worker-node2-2
+      - NODE_ID=node2
+      - PORT=5000
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+    ports:
+      - "5005:5000"
+    volumes:
+      - ../functions:/app/functions:ro
+    deploy:
+      resources:
+        limits:
+          cpus: '1.6'
+          memory: 1.6G
+        reservations:
+          cpus: '0.8'
+          memory: 800M
+    depends_on:
+      - redis
+    restart: unless-stopped
+
+  ditto-worker-node2-3:
+    image: dataflower/worker:latest
+    container_name: ditto-worker-node2-3
+    labels:
+      - dataflower-type=generic-worker
+      - dataflower-node=node2
+      - dataflower-scheduler=ditto
+    environment:
+      - WORKER_ID=worker-node2-3
+      - NODE_ID=node2
+      - PORT=5000
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+    ports:
+      - "5006:5000"
+    volumes:
+      - ../functions:/app/functions:ro
+    deploy:
+      resources:
+        limits:
+          cpus: '1.6'
+          memory: 1.6G
+        reservations:
+          cpus: '0.8'
+          memory: 800M
+    depends_on:
+      - redis
+    restart: unless-stopped
+
+  ditto-worker-node2-4:
+    image: dataflower/worker:latest
+    container_name: ditto-worker-node2-4
+    labels:
+      - dataflower-type=generic-worker
+      - dataflower-node=node2
+      - dataflower-scheduler=ditto
+    environment:
+      - WORKER_ID=worker-node2-4
+      - NODE_ID=node2
+      - PORT=5000
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+    ports:
+      - "5015:5000"
+    volumes:
+      - ../functions:/app/functions:ro
+    deploy:
+      resources:
+        limits:
+          cpus: '1.6'
+          memory: 1.6G
+        reservations:
+          cpus: '0.8'
+          memory: 800M
+    depends_on:
+      - redis
+    restart: unless-stopped
+
+  ditto-worker-node2-5:
+    image: dataflower/worker:latest
+    container_name: ditto-worker-node2-5
+    labels:
+      - dataflower-type=generic-worker
+      - dataflower-node=node2
+      - dataflower-scheduler=ditto
+    environment:
+      - WORKER_ID=worker-node2-5
+      - NODE_ID=node2
+      - PORT=5000
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+    ports:
+      - "5016:5000"
+    volumes:
+      - ../functions:/app/functions:ro
+    deploy:
+      resources:
+        limits:
+          cpus: '1.6'
+          memory: 1.6G
+        reservations:
+          cpus: '0.8'
+          memory: 800M
+    depends_on:
+      - redis
+    restart: unless-stopped
+
+  # ===== NODE 3: LIGHTWEIGHT NODE =====
+  # 8 workers for lightweight functions (Target: 4.125 CPU cores, 4.125 GB memory)
+  
+  ditto-worker-node3-1:
+    image: dataflower/worker:latest
+    container_name: ditto-worker-node3-1
+    labels:
+      - dataflower-type=generic-worker
+      - dataflower-node=node3
+      - dataflower-scheduler=ditto
+    environment:
+      - WORKER_ID=worker-node3-1
+      - NODE_ID=node3
+      - PORT=5000
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+    ports:
+      - "5007:5000"
+    volumes:
+      - ../functions:/app/functions:ro
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+        reservations:
+          cpus: '0.25'
+          memory: 256M
+    depends_on:
+      - redis
+    restart: unless-stopped
+
+  ditto-worker-node3-2:
+    image: dataflower/worker:latest
+    container_name: ditto-worker-node3-2
+    labels:
+      - dataflower-type=generic-worker
+      - dataflower-node=node3
+      - dataflower-scheduler=ditto
+    environment:
+      - WORKER_ID=worker-node3-2
+      - NODE_ID=node3
+      - PORT=5000
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+    ports:
+      - "5008:5000"
+    volumes:
+      - ../functions:/app/functions:ro
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+        reservations:
+          cpus: '0.25'
+          memory: 256M
+    depends_on:
+      - redis
+    restart: unless-stopped
+
+  ditto-worker-node3-3:
+    image: dataflower/worker:latest
+    container_name: ditto-worker-node3-3
+    labels:
+      - dataflower-type=generic-worker
+      - dataflower-node=node3
+      - dataflower-scheduler=ditto
+    environment:
+      - WORKER_ID=worker-node3-3
+      - NODE_ID=node3
+      - PORT=5000
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+    ports:
+      - "5017:5000"
+    volumes:
+      - ../functions:/app/functions:ro
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+        reservations:
+          cpus: '0.25'
+          memory: 256M
+    depends_on:
+      - redis
+    restart: unless-stopped
+
+  ditto-worker-node3-4:
+    image: dataflower/worker:latest
+    container_name: ditto-worker-node3-4
+    labels:
+      - dataflower-type=generic-worker
+      - dataflower-node=node3
+      - dataflower-scheduler=ditto
+    environment:
+      - WORKER_ID=worker-node3-4
+      - NODE_ID=node3
+      - PORT=5000
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+    ports:
+      - "5018:5000"
+    volumes:
+      - ../functions:/app/functions:ro
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+        reservations:
+          cpus: '0.25'
+          memory: 256M
+    depends_on:
+      - redis
+    restart: unless-stopped
+
+  ditto-worker-node3-5:
+    image: dataflower/worker:latest
+    container_name: ditto-worker-node3-5
+    labels:
+      - dataflower-type=generic-worker
+      - dataflower-node=node3
+      - dataflower-scheduler=ditto
+    environment:
+      - WORKER_ID=worker-node3-5
+      - NODE_ID=node3
+      - PORT=5000
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+    ports:
+      - "5019:5000"
+    volumes:
+      - ../functions:/app/functions:ro
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+        reservations:
+          cpus: '0.25'
+          memory: 256M
+    depends_on:
+      - redis
+    restart: unless-stopped
+
+  ditto-worker-node3-6:
+    image: dataflower/worker:latest
+    container_name: ditto-worker-node3-6
+    labels:
+      - dataflower-type=generic-worker
+      - dataflower-node=node3
+      - dataflower-scheduler=ditto
+    environment:
+      - WORKER_ID=worker-node3-6
+      - NODE_ID=node3
+      - PORT=5000
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+    ports:
+      - "5020:5000"
+    volumes:
+      - ../functions:/app/functions:ro
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+        reservations:
+          cpus: '0.25'
+          memory: 256M
+    depends_on:
+      - redis
+    restart: unless-stopped
+
+  ditto-worker-node3-7:
+    image: dataflower/worker:latest
+    container_name: ditto-worker-node3-7
+    labels:
+      - dataflower-type=generic-worker
+      - dataflower-node=node3
+      - dataflower-scheduler=ditto
+    environment:
+      - WORKER_ID=worker-node3-7
+      - NODE_ID=node3
+      - PORT=5000
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+    ports:
+      - "5021:5000"
+    volumes:
+      - ../functions:/app/functions:ro
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+        reservations:
+          cpus: '0.25'
+          memory: 256M
+    depends_on:
+      - redis
+    restart: unless-stopped
+
+  ditto-worker-node3-8:
+    image: dataflower/worker:latest
+    container_name: ditto-worker-node3-8
+    labels:
+      - dataflower-type=generic-worker
+      - dataflower-node=node3
+      - dataflower-scheduler=ditto
+    environment:
+      - WORKER_ID=worker-node3-8
+      - NODE_ID=node3
+      - PORT=5000
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+    ports:
+      - "5022:5000"
+    volumes:
+      - ../functions:/app/functions:ro
+    deploy:
+      resources:
+        limits:
+          cpus: '0.625'
+          memory: 625M
+        reservations:
+          cpus: '0.3125'
+          memory: 312M
+    depends_on:
+      - redis
+    restart: unless-stopped
+
+  # ===== NODE 4: COMPUTE-OPTIMIZED NODE =====
+  # 7 workers for compute-intensive functions (Target: 17.25 CPU cores, 19.5 GB memory)
+  
+  ditto-worker-node4-1:
+    image: dataflower/worker:latest
+    container_name: ditto-worker-node4-1
+    labels:
+      - dataflower-type=generic-worker
+      - dataflower-node=node4
+      - dataflower-scheduler=ditto
+    environment:
+      - WORKER_ID=worker-node4-1
+      - NODE_ID=node4
+      - PORT=5000
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+    ports:
+      - "5009:5000"
+    volumes:
+      - ../functions:/app/functions:ro
+    deploy:
+      resources:
+        limits:
+          cpus: '2.5'
+          memory: 3G
+        reservations:
+          cpus: '1.25'
+          memory: 1.5G
+    depends_on:
+      - redis
+    restart: unless-stopped
+
+  ditto-worker-node4-2:
+    image: dataflower/worker:latest
+    container_name: ditto-worker-node4-2
+    labels:
+      - dataflower-type=generic-worker
+      - dataflower-node=node4
+      - dataflower-scheduler=ditto
+    environment:
+      - WORKER_ID=worker-node4-2
+      - NODE_ID=node4
+      - PORT=5000
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+    ports:
+      - "5010:5000"
+    volumes:
+      - ../functions:/app/functions:ro
+    deploy:
+      resources:
+        limits:
+          cpus: '2.5'
+          memory: 3G
+        reservations:
+          cpus: '1.25'
+          memory: 1.5G
+    depends_on:
+      - redis
+    restart: unless-stopped
+
+  ditto-worker-node4-3:
+    image: dataflower/worker:latest
+    container_name: ditto-worker-node4-3
+    labels:
+      - dataflower-type=generic-worker
+      - dataflower-node=node4
+      - dataflower-scheduler=ditto
+    environment:
+      - WORKER_ID=worker-node4-3
+      - NODE_ID=node4
+      - PORT=5000
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+    ports:
+      - "5011:5000"
+    volumes:
+      - ../functions:/app/functions:ro
+    deploy:
+      resources:
+        limits:
+          cpus: '2.5'
+          memory: 3G
+        reservations:
+          cpus: '1.25'
+          memory: 1.5G
+    depends_on:
+      - redis
+    restart: unless-stopped
+
+  ditto-worker-node4-4:
+    image: dataflower/worker:latest
+    container_name: ditto-worker-node4-4
+    labels:
+      - dataflower-type=generic-worker
+      - dataflower-node=node4
+      - dataflower-scheduler=ditto
+    environment:
+      - WORKER_ID=worker-node4-4
+      - NODE_ID=node4
+      - PORT=5000
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+    ports:
+      - "5023:5000"
+    volumes:
+      - ../functions:/app/functions:ro
+    deploy:
+      resources:
+        limits:
+          cpus: '2.5'
+          memory: 3G
+        reservations:
+          cpus: '1.25'
+          memory: 1.5G
+    depends_on:
+      - redis
+    restart: unless-stopped
+
+  ditto-worker-node4-5:
+    image: dataflower/worker:latest
+    container_name: ditto-worker-node4-5
+    labels:
+      - dataflower-type=generic-worker
+      - dataflower-node=node4
+      - dataflower-scheduler=ditto
+    environment:
+      - WORKER_ID=worker-node4-5
+      - NODE_ID=node4
+      - PORT=5000
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+    ports:
+      - "5024:5000"
+    volumes:
+      - ../functions:/app/functions:ro
+    deploy:
+      resources:
+        limits:
+          cpus: '2.5'
+          memory: 3G
+        reservations:
+          cpus: '1.25'
+          memory: 1.5G
+    depends_on:
+      - redis
+    restart: unless-stopped
+
+  ditto-worker-node4-6:
+    image: dataflower/worker:latest
+    container_name: ditto-worker-node4-6
+    labels:
+      - dataflower-type=generic-worker
+      - dataflower-node=node4
+      - dataflower-scheduler=ditto
+    environment:
+      - WORKER_ID=worker-node4-6
+      - NODE_ID=node4
+      - PORT=5000
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+    ports:
+      - "5025:5000"
+    volumes:
+      - ../functions:/app/functions:ro
+    deploy:
+      resources:
+        limits:
+          cpus: '2.5'
+          memory: 3G
+        reservations:
+          cpus: '1.25'
+          memory: 1.5G
+    depends_on:
+      - redis
+    restart: unless-stopped
+
+  ditto-worker-node4-7:
+    image: dataflower/worker:latest
+    container_name: ditto-worker-node4-7
+    labels:
+      - dataflower-type=generic-worker
+      - dataflower-node=node4
+      - dataflower-scheduler=ditto
+    environment:
+      - WORKER_ID=worker-node4-7
+      - NODE_ID=node4
+      - PORT=5000
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+    ports:
+      - "5026:5000"
+    volumes:
+      - ../functions:/app/functions:ro
+    deploy:
+      resources:
+        limits:
+          cpus: '2.25'
+          memory: 1.5G
+        reservations:
+          cpus: '1.125'
+          memory: 750M
+    depends_on:
+      - redis
+    restart: unless-stopped
+
+networks:
+  default:
+    name: dataflower
+

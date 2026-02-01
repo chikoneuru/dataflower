@@ -1,0 +1,53 @@
+# MinIO setup for data locality storage
+# Add this to your existing docker-compose setup
+
+version: '3.8'
+
+networks:
+  shared_network:
+    external: true  # Use existing shared network
+
+services:
+  # MinIO for large file storage (S3-compatible)
+  minio:
+    image: minio/minio:latest
+    container_name: dataflower_minio
+    hostname: minio
+    restart: unless-stopped
+    ports:
+      - "9000:9000"      # MinIO API
+      - "9001:9001"      # MinIO Console (Web UI)
+    environment:
+      - MINIO_ROOT_USER=dataflower
+      - MINIO_ROOT_PASSWORD=dataflower123
+    volumes:
+      - minio_data:/data
+    networks:
+      - shared_network
+    command: server /data --console-address ":9001"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 30s
+      timeout: 20s
+      retries: 3
+
+  # MinIO Client for setup (creates bucket automatically)
+  minio_setup:
+    image: minio/mc:latest
+    container_name: dataflower_minio_setup
+    depends_on:
+      - minio
+    networks:
+      - shared_network
+    entrypoint: >
+      /bin/sh -c "
+      sleep 10;
+      mc alias set myminio http://minio:9000 dataflower dataflower123;
+      mc mb myminio/dataflower-storage --ignore-existing;
+      mc policy set public myminio/dataflower-storage;
+      echo 'MinIO bucket setup complete!';
+      "
+
+volumes:
+  minio_data:
+    driver: local

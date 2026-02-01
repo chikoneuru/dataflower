@@ -1,0 +1,14 @@
+# Analysis Dependencies
+# Install with: pip install -r analysis/requirements.txt
+
+# Core data analysis
+pandas>=1.5.0
+numpy>=1.21.0
+
+# Visualization (optional - for full analysis)
+matplotlib>=3.5.0
+seaborn>=0.11.0
+
+# Jupyter notebook support (optional)
+jupyter>=1.0.0
+ipykernel>=6.0.0
