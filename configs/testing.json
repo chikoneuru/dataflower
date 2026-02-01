@@ -1,0 +1,49 @@
+{
+  "name": "testing",
+  "description": "Configuration for end-to-end testing with a simple, predictable scheduler.",
+  "enable_logging": true,
+  "log_level": "INFO",
+  "enable_metrics": true,
+
+  "cost_models": {
+    "algorithm": "mock",
+    "cpu_weight": 0.4,
+    "memory_weight": 0.2,
+    "network_weight": 0.3,
+    "storage_weight": 0.1,
+    "cold_start_penalty": 5.0
+  },
+
+  "mode_classifier": {
+    "algorithm": "ccr",
+    "threshold": 1.0
+  },
+
+  "scheduling": {
+    "algorithm": "random_worker",
+    "network_topology_awareness": false,
+    "packing_strategy": "binpack"
+  },
+
+  "optimization": {
+    "algorithm": "none",
+    "max_iterations": 100,
+    "time_limit": 5,
+    "early_exit_patience": 10
+  },
+
+  "resource_management": {
+    "enable_autoscaling": true,
+    "scale_up_threshold": 0.8,
+    "scale_down_threshold": 0.3,
+    "min_replicas": 1,
+    "max_replicas": 10,
+    "cooldown_period": 300
+  },
+
+  "faas_provider": {
+    "name": "docker_compose",
+    "endpoint": "unix://var/run/docker.sock",
+    "worker_label": "dataflower-role=worker"
+  }
+}

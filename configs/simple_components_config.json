@@ -1,0 +1,25 @@
+{
+  "remote_storage": {
+    "type": "local_file",
+    "base_path": "/tmp/dataflower_simple"
+  },
+  "cache": {
+    "cache_dir": "/tmp/dataflower_cache",
+    "max_disk_size_gb": 1,
+    "max_memory_size_mb": 256,
+    "max_items": 100,
+    "max_age_hours": 12
+  },
+  "locality": {
+    "node_id": "simple-node",
+    "enable_locality": true,
+    "enable_metrics": true
+  },
+  "storage_strategy": {
+    "testing": "mock",
+    "development": "local_file",
+    "staging": "local_file",
+    "production": "local_file"
+  },
+  "current_environment": "development"
+}

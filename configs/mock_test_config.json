@@ -1,0 +1,24 @@
+{
+  "remote_storage": {
+    "type": "mock"
+  },
+  "cache": {
+    "cache_dir": "/tmp/test_cache",
+    "max_disk_size_gb": 0.1,
+    "max_memory_size_mb": 64,
+    "max_items": 10,
+    "max_age_hours": 1
+  },
+  "locality": {
+    "node_id": "test-node",
+    "enable_locality": false,
+    "enable_metrics": true
+  },
+  "storage_strategy": {
+    "testing": "mock",
+    "development": "mock",
+    "staging": "mock",
+    "production": "mock"
+  },
+  "current_environment": "testing"
+}

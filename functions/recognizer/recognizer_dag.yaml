@@ -1,0 +1,62 @@
+version: "1.0"
+name: recognizer
+
+# Maps the short, readable names used in the pipeline to the
+# actual function module names that the system will execute.
+function_mapping:
+  upload: recognizer__upload
+  adult_check: recognizer__adult
+  violence_check: recognizer__violence
+  extract_text: recognizer__extract
+  translate: recognizer__translate
+  censor: recognizer__censor
+  mosaic: recognizer__mosaic
+
+# The initial input required to start the workflow.
+inputs:
+  img: blob
+
+# The logical flow of the workflow.
+pipeline:
+  - upload:
+      in: { img: $inputs.img }
+      out: { img_b64: result.img_clean_b64 }
+
+  - parallel:
+      - adult_check:
+          in: { img: $inputs.img } # Operates on the original raw image
+          out: { illegal_adult: result.is_adult }
+
+      - violence_check:
+          in: { img: $inputs.img } # Operates on the original raw image
+          out: { illegal_violence: result.illegal }
+
+  - switch:
+      condition: "{{ adult_check.illegal_adult or violence_check.illegal_violence }}"
+      then:
+        - mosaic:
+            in: { img: $inputs.img } # Operates on the original raw image
+            out: { content: result }
+            end: true
+      else:
+        - extract_text:
+            in: { img: $inputs.img } # Operates on the original raw image
+            out: { text: result.text }
+
+        - translate:
+            in: { text: $extract_text.text }
+            out: { translated_text: result.translated_text }
+
+        - censor:
+            in: { text: $translate.translated_text }
+            out: { illegal_text: result.illegal }
+
+        - switch:
+            condition: "{{ censor.illegal_text }}"
+            then:
+              - mosaic:
+                  in: { img: $inputs.img } # Operates on the original raw image
+                  out: { content: result }
+                  end: true
+            else:
+              - end: true

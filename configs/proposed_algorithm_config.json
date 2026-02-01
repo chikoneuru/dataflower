@@ -1,0 +1,38 @@
+{
+  "remote_storage": {
+    "type": "minio",
+    "minio_host": "minio",
+    "minio_port": 9000,
+    "access_key": "dataflower",
+    "secret_key": "dataflower123",
+    "bucket_name": "dataflower-storage",
+    "region": "us-east-1"
+  },
+  "cache": {
+    "cache_dir": "/.tmp/dataflower_cache",
+    "max_disk_size_gb": 5,
+    "max_memory_size_mb": 1024,
+    "max_items": 1000,
+    "max_age_hours": 24,
+    "cleanup_interval_seconds": 300,
+    "eviction_strategy": "lru"
+  },
+  "locality": {
+    "node_id": "algorithm-node",
+    "enable_locality": true,
+    "enable_metrics": true,
+    "locality_weights": {
+      "local_data_bonus": 100.0,
+      "transfer_cost_penalty": 1.0,
+      "cache_hit_bonus": 50.0,
+      "cross_node_penalty": 10.0
+    }
+  },
+  "storage_strategy": {
+    "testing": "mock",
+    "development": "minio",
+    "staging": "minio",
+    "production": "minio"
+  },
+  "current_environment": "development"
+}

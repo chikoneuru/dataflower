@@ -1,0 +1,6 @@
+keras
+pillow
+numpy
+fastapi
+uvicorn
+python-multipart

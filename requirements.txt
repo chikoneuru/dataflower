@@ -1,0 +1,24 @@
+# Core dependencies for Dataflower project
+fastapi==0.116.1
+uvicorn==0.35.0
+python-multipart==0.0.20
+redis==6.4.0
+psutil
+numpy==1.26.4
+docker
+requests==2.31.0
+
+# Data Locality and Remote Storage
+boto3>=1.26.0
+botocore>=1.29.0
+
+# Machine Learning (optional, for specific functions)
+# tensorflow==2.15.0
+# keras==2.15.0
+# Pillow==10.2.0
+# opencv-python-headless==4.9.0.80
+# pytesseract==0.3.10
+
+# Testing
+pytest>=7.0.0
+pytest-asyncio>=0.21.0

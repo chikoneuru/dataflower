@@ -1,0 +1,53 @@
+{
+  "cost_models": {
+    "algorithm": "mock",
+    "base_cold_start": 2.0,
+    "congestion_factor": 1.2,
+    "cpu_interference_factor": 0.5,
+    "memory_penalty_factor": 1.0,
+    "enable_caching": true,
+    "cache_size": 1000
+  },
+  "mode_classifier": {
+    "algorithm": "mock",
+    "threshold": 1.0,
+    "network_bound_weights": {
+      "alpha": 0.1,
+      "beta": 0.7,
+      "gamma": 0.1,
+      "delta": 0.1
+    },
+    "compute_bound_weights": {
+      "alpha": 0.6,
+      "beta": 0.1,
+      "gamma": 0.1,
+      "delta": 0.2
+    },
+    "enable_adaptive_threshold": false,
+    "history_window": 10
+  },
+  "scheduling": {
+    "algorithm": "mock",
+    "enable_priority_queue": true,
+    "max_retries": 3,
+    "locality_bonus": 100.0,
+    "load_balance_penalty": 0.1,
+    "enable_dynamic_switching": false
+  },
+  "optimization": {
+    "algorithm": "mock",
+    "max_iterations": 100,
+    "time_limit": 5.0,
+    "initial_temp": 100.0,
+    "cooling_rate": 0.95,
+    "final_temp": 0.1,
+    "population_size": 50,
+    "mutation_rate": 0.1,
+    "crossover_rate": 0.8,
+    "enable_parallel": false
+  },
+  "enable_logging": true,
+  "log_level": "DEBUG",
+  "enable_metrics": true,
+  "metrics_interval": 1.0
+}
