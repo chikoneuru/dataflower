@@ -1,0 +1,60 @@
+# Experiment Configuration
+# This file defines the parameters for scheduler comparison experiments
+
+# Input sizes to test (in MB)
+input_sizes:
+  - 0.1
+  - 1.0
+  - 5.0
+  - 10.0
+
+# Concurrency levels to test (number of parallel requests)
+concurrency_levels:
+  - 1
+  - 5
+  - 10
+  - 20
+
+# Schedulers to compare
+schedulers:
+  - "ours"           # Our advanced 2-phase scheduler
+
+
+# Number of requests per experiment
+requests_per_experiment: 7
+
+# Workflow to use
+workflow_name: "recognizer"
+
+# Input data configuration
+input_data:
+  # If input_file is specified, it will be used instead of synthetic data
+  input_file: null  # e.g., "data/test.png"
+  
+  # If no input_file, synthetic data will be generated based on input_size_mb
+  use_synthetic_data: true
+
+# Experiment settings
+experiment_settings:
+  # Timeout for individual function executions (seconds)
+  function_timeout: 300
+  
+  # Maximum number of retries for failed requests
+  max_retries: 3
+  
+  # Whether to save detailed results for each function execution
+  save_detailed_results: true
+  
+  # Whether to print progress during experiments
+  verbose: true
+
+# Output configuration
+output:
+  # Directory to save results
+  results_dir: "results"
+  
+  # Whether to generate summary report
+  generate_summary: true
+  
+  # Whether to generate comparison charts (if matplotlib is available)
+  generate_charts: true

@@ -1,0 +1,97 @@
+version: "1.0"
+name: recognizer
+
+# Clear, simple workflow definition
+workflow:
+  inputs:
+    img: blob
+
+  # All function nodes with input/output specifications
+  nodes:
+    - id: recognizer__upload
+      type: task
+      in: { img: $inputs.img }
+      out: { img_b64: result.img_clean_b64 }
+      
+    - id: recognizer__adult
+      type: task
+      in: { img_b64: $recognizer__upload.img_b64 }
+      out: { is_adult: result.is_adult, confidence: result.confidence }
+      
+    - id: recognizer__violence
+      type: task
+      in: { img_b64: $recognizer__upload.img_b64 }
+      out: { illegal: result.illegal }
+      
+    - id: recognizer__extract
+      type: task
+      in: { img_b64: $recognizer__upload.img_b64 }
+      out: { text: result.text }
+      
+    - id: recognizer__translate
+      type: task
+      in: { text: $recognizer__extract.text }
+      out: { translated_text: result.translated_text }
+      
+    - id: recognizer__censor
+      type: task
+      in: { text: $recognizer__translate.translated_text }
+      out: { illegal_text: result.illegal, filtered_text: result.filtered_text }
+      
+    - id: recognizer__mosaic
+      type: task
+      in: { img_b64: $recognizer__upload.img_b64 }
+      out: { content: result }
+
+  # Clear workflow logic patterns
+  edges:
+    # PARALLEL: Upload triggers both adult and violence detection simultaneously
+    - type: parallel
+      from: recognizer__upload
+      to: 
+        - recognizer__adult
+        - recognizer__violence
+      shuffle_bytes: 3.05  # MB - base64-encoded image transfer
+
+    # SWITCH: Based on detection results, choose path
+    - type: switch
+      condition: "recognizer__adult.is_adult OR recognizer__violence.illegal"
+      branches:
+        then:
+          - from: [recognizer__adult, recognizer__violence]
+            to: recognizer__mosaic
+            shuffle_bytes: 0.0002  # MB - small metadata transfer
+        else:
+          - from: [recognizer__adult, recognizer__violence] 
+            to: recognizer__extract
+            shuffle_bytes: 3.05  # MB - base64-encoded image transfer
+
+    # SEQUENTIAL: Text processing chain
+    - type: sequential
+      from: recognizer__extract
+      to: recognizer__translate
+      shuffle_bytes: 0.002  # MB - extracted text transfer
+
+    - type: sequential
+      from: recognizer__translate
+      to: recognizer__censor
+      shuffle_bytes: 0.002  # MB - translated text transfer
+
+    # SWITCH: Final decision based on text content
+    - type: switch
+      condition: "recognizer__censor.illegal_text"
+      branches:
+        then:
+          - from: recognizer__censor
+            to: recognizer__mosaic
+            shuffle_bytes: 0.0003  # MB - small text metadata transfer
+        else:
+          - from: recognizer__censor
+            to: END
+            shuffle_bytes: 0.0003  # MB - small text metadata transfer
+
+    # MOSAIC to END edge (missing from original analysis)
+    - type: sequential
+      from: recognizer__mosaic
+      to: END
+      shuffle_bytes: 2.0  # MB - mosaic image output
