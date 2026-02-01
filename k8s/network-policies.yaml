@@ -1,0 +1,230 @@
+# Network Policies demonstrating label-based network segmentation
+# These policies show how to control communication between different function types
+
+---
+# Allow ML functions to communicate with each other
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-ml-communication
+  namespace: serverless
+spec:
+  podSelector:
+    matchLabels:
+      function-category: ml
+  policyTypes:
+  - Ingress
+  - Egress
+  ingress:
+  - from:
+    - podSelector:
+        matchLabels:
+          function-category: ml
+    ports:
+    - protocol: TCP
+      port: 8000
+  egress:
+  - to:
+    - podSelector:
+        matchLabels:
+          function-category: ml
+    ports:
+    - protocol: TCP
+      port: 8000
+  - to:
+    - namespaceSelector:
+        matchLabels:
+          name: serverless
+    ports:
+    - protocol: TCP
+      port: 6379  # Redis
+
+---
+# Allow data processing functions to communicate
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-data-communication
+  namespace: serverless
+spec:
+  podSelector:
+    matchLabels:
+      function-category: data
+  policyTypes:
+  - Ingress
+  - Egress
+  ingress:
+  - from:
+    - podSelector:
+        matchLabels:
+          function-category: data
+    ports:
+    - protocol: TCP
+      port: 8000
+  egress:
+  - to:
+    - podSelector:
+        matchLabels:
+          function-category: data
+    ports:
+    - protocol: TCP
+      port: 8000
+  - to:
+    - namespaceSelector:
+        matchLabels:
+          name: serverless
+    ports:
+    - protocol: TCP
+      port: 6379  # Redis
+
+---
+# Allow video processing functions to communicate
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-video-communication
+  namespace: serverless
+spec:
+  podSelector:
+    matchLabels:
+      function-category: video
+  policyTypes:
+  - Ingress
+  - Egress
+  ingress:
+  - from:
+    - podSelector:
+        matchLabels:
+          function-category: video
+    ports:
+    - protocol: TCP
+      port: 8000
+  egress:
+  - to:
+    - podSelector:
+        matchLabels:
+          function-category: video
+    ports:
+    - protocol: TCP
+      port: 8000
+  - to:
+    - namespaceSelector:
+        matchLabels:
+          name: serverless
+    ports:
+    - protocol: TCP
+      port: 6379  # Redis
+
+---
+# Allow text processing functions to communicate
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-text-communication
+  namespace: serverless
+spec:
+  podSelector:
+    matchLabels:
+      function-category: text
+  policyTypes:
+  - Ingress
+  - Egress
+  ingress:
+  - from:
+    - podSelector:
+        matchLabels:
+          function-category: text
+    ports:
+    - protocol: TCP
+      port: 8000
+  egress:
+  - to:
+    - podSelector:
+        matchLabels:
+          function-category: text
+    ports:
+    - protocol: TCP
+      port: 8000
+  - to:
+    - namespaceSelector:
+        matchLabels:
+          name: serverless
+    ports:
+    - protocol: TCP
+      port: 6379  # Redis
+
+---
+# Allow compute functions to communicate
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-compute-communication
+  namespace: serverless
+spec:
+  podSelector:
+    matchLabels:
+      function-category: compute
+  policyTypes:
+  - Ingress
+  - Egress
+  ingress:
+  - from:
+    - podSelector:
+        matchLabels:
+          function-category: compute
+    ports:
+    - protocol: TCP
+      port: 8000
+  egress:
+  - to:
+    - podSelector:
+        matchLabels:
+          function-category: compute
+    ports:
+    - protocol: TCP
+      port: 8000
+  - to:
+    - namespaceSelector:
+        matchLabels:
+          name: serverless
+    ports:
+    - protocol: TCP
+      port: 6379  # Redis
+
+---
+# Allow workers to communicate with all functions
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-worker-communication
+  namespace: serverless
+spec:
+  podSelector:
+    matchLabels:
+      app: serverless-worker
+  policyTypes:
+  - Ingress
+  - Egress
+  ingress:
+  - from:
+    - podSelector:
+        matchLabels:
+          deployment-tier: function
+    ports:
+    - protocol: TCP
+      port: 5000
+  egress:
+  - to:
+    - podSelector:
+        matchLabels:
+          deployment-tier: function
+    ports:
+    - protocol: TCP
+      port: 8000
+  - to:
+    - namespaceSelector:
+        matchLabels:
+          name: serverless
+    ports:
+    - protocol: TCP
+      port: 6379  # Redis

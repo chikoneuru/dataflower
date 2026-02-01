@@ -1,0 +1,40 @@
+# Include TensorFlow cache for faster builds
+!.tmp/tensorflow_cache/
+!.tmp/python_pkgs_whls/
+
+# Exclude common development files
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+env/
+venv/
+.venv/
+pip-log.txt
+pip-delete-this-directory.txt
+.tox/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+*.log
+.git/
+.mypy_cache/
+.pytest_cache/
+.hypothesis/
+
+# Node modules (if any)
+node_modules/
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS files
+.DS_Store
+Thumbs.db

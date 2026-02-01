@@ -1,0 +1,74 @@
+{
+  "name": "mock",
+  "description": "Mock configuration for testing with all mocked components",
+  "enable_logging": true,
+  "log_level": "INFO",
+  "enable_metrics": true,
+
+  "remote_storage": {
+    "type": "mock"
+  },
+  "cache": {
+    "cache_dir": "/tmp/test_cache",
+    "max_disk_size_gb": 0.1,
+    "max_memory_size_mb": 64,
+    "max_items": 10,
+    "max_age_hours": 1
+  },
+  "locality": {
+    "node_id": "test-node",
+    "enable_locality": false,
+    "enable_metrics": true
+  },
+  "storage_strategy": {
+    "testing": "mock",
+    "development": "mock",
+    "staging": "mock",
+    "production": "mock"
+  },
+
+  "cost_models": {
+    "algorithm": "mock",
+    "cpu_weight": 0.4,
+    "memory_weight": 0.2,
+    "network_weight": 0.3,
+    "storage_weight": 0.1,
+    "cold_start_penalty": 5.0
+  },
+
+  "bottleneck_identifier": {
+    "algorithm": "simple_random",
+    "compute_threshold": 0.8,
+    "transfer_threshold": 0.8
+  },
+
+  "scheduling": {
+    "algorithm": "simple_load_balanced",
+    "network_topology_awareness": false,
+    "packing_strategy": "binpack"
+  },
+
+  "optimization": {
+    "algorithm": "none",
+    "max_iterations": 100,
+    "time_limit": 5,
+    "early_exit_patience": 10
+  },
+
+  "resource_management": {
+    "enable_autoscaling": true,
+    "scale_up_threshold": 0.8,
+    "scale_down_threshold": 0.3,
+    "min_replicas": 1,
+    "max_replicas": 10,
+    "cooldown_period": 300
+  },
+
+  "faas_provider": {
+    "name": "docker_compose",
+    "endpoint": "unix://var/run/docker.sock",
+    "worker_label": "dataflower-role=worker"
+  },
+
+  "current_environment": "testing"
+}

@@ -1,0 +1,95 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: serverless-worker
+  namespace: serverless
+  labels:
+    app: serverless-worker
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: serverless-worker
+  template:
+    metadata:
+      labels:
+        app: serverless-worker
+    spec:
+      # Node affinity to ensure workers are distributed across different nodes
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 100
+            podAffinityTerm:
+              labelSelector:
+                matchExpressions:
+                - key: app
+                  operator: In
+                  values:
+                  - serverless-worker
+              topologyKey: kubernetes.io/hostname
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+            - matchExpressions:
+              - key: node-role.kubernetes.io/worker
+                operator: Exists
+      containers:
+      - name: worker
+        image: serverless_worker:latest
+        imagePullPolicy: Never  # Use local image
+        ports:
+        - containerPort: 5000
+        env:
+        - name: REDIS_HOST
+          value: "redis"
+        - name: REDIS_PORT
+          value: "6379"
+        - name: NODE_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: spec.nodeName
+        - name: POD_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.name
+        resources:
+          requests:
+            memory: "128Mi"
+            cpu: "100m"
+          limits:
+            memory: "256Mi"
+            cpu: "200m"
+        volumeMounts:
+        - name: worker-code
+          mountPath: /app/worker
+        - name: provider-code
+          mountPath: /app/provider
+        - name: functions-code
+          mountPath: /app/functions
+      volumes:
+      - name: worker-code
+        hostPath:
+          path: /host/worker
+          type: Directory
+      - name: provider-code
+        hostPath:
+          path: /host/provider
+          type: Directory
+      - name: functions-code
+        hostPath:
+          path: /host/functions
+          type: Directory
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: serverless-worker
+  namespace: serverless
+spec:
+  selector:
+    app: serverless-worker
+  ports:
+  - port: 5000
+    targetPort: 5000
+  type: ClusterIP
