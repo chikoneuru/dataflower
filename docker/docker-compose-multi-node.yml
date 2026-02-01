@@ -1,0 +1,234 @@
+networks:
+  node1_network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.1.0/24
+  node2_network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.2.0/24
+  # node3_network:
+  #   driver: bridge
+  #   ipam:
+  #     config:
+  #       - subnet: 172.20.3.0/24
+  # node4_network:
+  #   driver: bridge
+  #   ipam:
+  #     config:
+  #       - subnet: 172.20.4.0/24
+  shared_network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/24
+
+services:
+  # Redis for task coordination
+  redis:
+    image: redis:latest
+    container_name: serverless_redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    networks:
+      - shared_network
+    command: redis-server --appendonly yes
+
+  # MinIO for large file storage (S3-compatible)
+  minio:
+    image: minio/minio:latest
+    container_name: dataflower_minio
+    hostname: minio
+    restart: unless-stopped
+    ports:
+      - "9000:9000"      # MinIO API
+      - "9001:9001"      # MinIO Console (Web UI)
+    environment:
+      - MINIO_ROOT_USER=dataflower
+      - MINIO_ROOT_PASSWORD=dataflower123
+    volumes:
+      - minio_data:/data
+    networks:
+      - shared_network
+    command: server /data --console-address ":9001"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 30s
+      timeout: 20s
+      retries: 3
+
+  # MinIO Client for setup (creates bucket automatically)
+  minio_setup:
+    image: minio/mc:latest
+    container_name: dataflower_minio_setup
+    depends_on:
+      - minio
+    networks:
+      - shared_network
+    entrypoint: >
+      /bin/sh -c "
+      sleep 10;
+      mc alias set myminio http://minio:9000 dataflower dataflower123;
+      mc mb myminio/dataflower-storage --ignore-existing;
+      mc policy set public myminio/dataflower-storage;
+      echo 'MinIO bucket setup complete!';
+      "
+
+  # Node 1
+  node1_worker:
+    build:
+      context: ..
+      dockerfile: worker/Dockerfile
+    container_name: node1_worker
+    hostname: node1_worker
+    environment:
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - NODE_NAME=node1
+      - NODE_TYPE=node-1
+      - MINIO_HOST=minio
+      - MINIO_PORT=9000
+      - MINIO_ACCESS_KEY=dataflower
+      - MINIO_SECRET_KEY=dataflower123
+      - MINIO_BUCKET=dataflower-storage
+    ports:
+      - "5001:5000"
+    networks:
+      - node1_network
+      - shared_network
+    volumes:
+      - ../worker:/app/worker
+      - ../provider:/app/provider
+      - ../functions:/app/functions
+      - node1_cache_data:/tmp/serverless_cache # Dedicated local cache for node1
+    labels:
+      - "node-type=node-1"
+      - "node-id=node1"
+      - "node-tier=standard"
+      - "dataflower-role=worker"
+
+  # Node 1 - Second Worker
+  node1_worker_2:
+    build:
+      context: ..
+      dockerfile: worker/Dockerfile
+    container_name: node1_worker_2
+    hostname: node1_worker_2
+    environment:
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - NODE_NAME=node1
+      - NODE_TYPE=node-1
+      - MINIO_HOST=minio
+      - MINIO_PORT=9000
+      - MINIO_ACCESS_KEY=dataflower
+      - MINIO_SECRET_KEY=dataflower123
+      - MINIO_BUCKET=dataflower-storage
+    ports:
+      - "5003:5000" # Unique port for this worker
+    networks:
+      - node1_network
+      - shared_network
+    volumes:
+      - ../worker:/app/worker
+      - ../provider:/app/provider
+      - ../functions:/app/functions
+      - node1_cache_data:/tmp/serverless_cache # Shared local cache with node1_worker
+    labels:
+      - "node-type=node-1"
+      - "node-id=node1"
+      - "node-tier=standard"
+      - "dataflower-role=worker"
+
+  # Node 2 - Compute Functions
+  node2_worker:
+    build:
+      context: ..
+      dockerfile: worker/Dockerfile
+    container_name: node2_worker
+    hostname: node2_worker
+    environment:
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - NODE_NAME=node2
+      - NODE_TYPE=node-2
+      - MINIO_HOST=minio
+      - MINIO_PORT=9000
+      - MINIO_ACCESS_KEY=dataflower
+      - MINIO_SECRET_KEY=dataflower123
+      - MINIO_BUCKET=dataflower-storage
+    ports:
+      - "5002:5000"
+    networks:
+      - node2_network
+      - shared_network
+    volumes:
+      - ../worker:/app/worker
+      - ../provider:/app/provider
+      - ../functions:/app/functions
+      - node2_cache_data:/tmp/serverless_cache # Dedicated local cache for node2
+    labels:
+      - "node-type=node-2"
+      - "node-id=node2"
+      - "node-tier=standard"
+      - "dataflower-role=worker"
+
+  # # Node 3
+  # node3_worker:
+  #   build:
+  #     context: ..
+  #     dockerfile: worker/Dockerfile
+  #   container_name: node3_worker
+  #   environment:
+  #     - REDIS_HOST=serverless_redis
+  #     - REDIS_PORT=6379
+  #     - NODE_NAME=node3
+  #     - NODE_TYPE=node-3
+  #   ports:
+  #     - "5003:5000"
+  #   networks:
+  #     - node3_network
+  #     - shared_network
+  #   volumes:
+  #     - ../worker:/app/worker
+  #     - ../provider:/app/provider
+  #     - ../functions:/app/functions
+  #   labels:
+  #     - "node-type=node-3"
+  #     - "node-id=node3"
+  #     - "node-tier=standard"
+  #     - "dataflower-role=worker"
+
+  # # Node 4
+  # node4_worker:
+  #   build:
+  #     context: ..
+  #     dockerfile: worker/Dockerfile
+  #   container_name: node4_worker
+  #   environment:
+  #     - REDIS_HOST=serverless_redis
+  #     - REDIS_PORT=6379
+  #     - NODE_NAME=node4
+  #     - NODE_TYPE=node-4
+  #   ports:
+  #     - "5004:5000"
+  #   networks:
+  #     - node4_network
+  #     - shared_network
+  #   volumes:
+  #     - ../worker:/app/worker
+  #     - ../provider:/app/provider
+  #     - ../functions:/app/functions
+  #   labels:
+  #     - "node-type=node-4"
+  #     - "node-id=node4"
+  #     - "node-tier=standard"
+  #     - "dataflower-role=worker"
+
+volumes:
+  node1_cache_data:
+  node2_cache_data:
+  minio_data:

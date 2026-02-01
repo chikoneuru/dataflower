@@ -1,0 +1,755 @@
+# Docker Compose for Per-Function Container Pools
+# Creates warm containers for different functions across multiple simulated nodes
+# Each node has different network and resource configurations
+
+networks:
+  # Shared network for cross-node communication
+  dataflower-shared:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.25.0.0/24
+  
+  # Node-specific networks (simulating different physical nodes)
+  node1-network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.25.1.0/24
+  
+  node2-network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.25.2.0/24
+  
+  node3-network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.25.3.0/24
+        
+  node4-network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.25.4.0/24
+
+services:
+  # ===== INFRASTRUCTURE SERVICES =====
+  
+  redis:
+    image: redis:7-alpine
+    container_name: dataflower_redis
+    networks:
+      - dataflower-shared
+    ports:
+      - "6379:6379"
+    restart: unless-stopped
+    labels:
+      - "dataflower-role=infrastructure"
+      - "dataflower-service=redis"
+
+  # ===== DITTO WORKERS =====
+  # Generic workers for Ditto scheduler (isolated ports 5001-5003)
+  
+  ditto-worker-1:
+    image: dataflower/worker:latest
+    container_name: ditto-worker-1
+    networks:
+      - dataflower-shared
+      - node1-network
+    labels:
+      - "dataflower-type=generic-worker"
+      - "dataflower-scheduler=ditto"
+    environment:
+      - WORKER_ID=worker-1
+      - PORT=5000
+      - REDIS_HOST=dataflower_redis
+      - REDIS_PORT=6379
+    ports:
+      - "5001:5000"
+    volumes:
+      - ../functions:/app/functions:ro
+    depends_on:
+      - redis
+    restart: unless-stopped
+
+  ditto-worker-2:
+    image: dataflower/worker:latest
+    container_name: ditto-worker-2
+    networks:
+      - dataflower-shared
+      - node2-network
+    labels:
+      - "dataflower-type=generic-worker"
+      - "dataflower-scheduler=ditto"
+    environment:
+      - WORKER_ID=worker-2
+      - PORT=5000
+      - REDIS_HOST=dataflower_redis
+      - REDIS_PORT=6379
+    ports:
+      - "5002:5000"
+    volumes:
+      - ../functions:/app/functions:ro
+    depends_on:
+      - redis
+    restart: unless-stopped
+
+  ditto-worker-3:
+    image: dataflower/worker:latest
+    container_name: ditto-worker-3
+    networks:
+      - dataflower-shared
+      - node3-network
+    labels:
+      - "dataflower-type=generic-worker"
+      - "dataflower-scheduler=ditto"
+    environment:
+      - WORKER_ID=worker-3
+      - PORT=5000
+      - REDIS_HOST=dataflower_redis
+      - REDIS_PORT=6379
+    ports:
+      - "5003:5000"
+    volumes:
+      - ../functions:/app/functions:ro
+    depends_on:
+      - redis
+    restart: unless-stopped
+
+  minio:
+    image: minio/minio:latest
+    container_name: dataflower_minio
+    networks:
+      - dataflower-shared
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    environment:
+      MINIO_ACCESS_KEY: dataflower
+      MINIO_SECRET_KEY: dataflower123
+    command: server /data --console-address ":9001"
+    restart: unless-stopped
+    labels:
+      - "dataflower-role=infrastructure"
+      - "dataflower-service=minio"
+
+  # ===== NODE 1: HIGH-PERFORMANCE NODE =====
+  # Optimized for compute-intensive functions (adult detection, violence detection)
+  
+  recognizer-adult-node1-1:
+    build:
+      context: ../
+      dockerfile: functions/recognizer/recognizer__adult/Dockerfile
+    image: dataflower/recognizer__adult:latest
+    container_name: recognizer-adult-node1-1
+    networks:
+      dataflower-shared:
+      node1-network:
+        ipv4_address: 172.25.1.10
+    ports:
+      - "8001:8080"
+    environment:
+      - FUNCTION_NAME=recognizer__adult
+      - NODE_ID=node1
+      - POD_NAME=recognizer-adult-node1-1
+      - REDIS_HOST=dataflower_redis
+      - REDIS_PORT=6379
+      - MINIO_HOST=dataflower_minio
+      - MINIO_PORT=9000
+      - MINIO_ACCESS_KEY=dataflower
+      - MINIO_SECRET_KEY=dataflower123
+      - MINIO_BUCKET=serverless-data
+    volumes:
+      - ../functions/recognizer/recognizer__adult/main.py:/app/main.py:ro
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 3G
+        reservations:
+          cpus: '0.5'
+          memory: 1G
+    restart: unless-stopped
+    command: ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8080"]
+    labels:
+      - "dataflower-type=function"
+      - "dataflower-function=recognizer__adult"
+      - "dataflower-node=node1"
+      - "dataflower-node-type=high-performance"
+      - "dataflower-replica=1"
+
+  recognizer-adult-node1-2:
+    build:
+      context: ../
+      dockerfile: functions/recognizer/recognizer__adult/Dockerfile
+    image: dataflower/recognizer__adult:latest
+    container_name: recognizer-adult-node1-2
+    networks:
+      dataflower-shared:
+      node1-network:
+        ipv4_address: 172.25.1.11
+    ports:
+      - "8002:8080"
+    environment:
+      - FUNCTION_NAME=recognizer__adult
+      - NODE_ID=node1
+      - POD_NAME=recognizer-adult-node1-2
+      - REDIS_HOST=dataflower_redis
+      - REDIS_PORT=6379
+      - MINIO_HOST=dataflower_minio
+      - MINIO_PORT=9000
+      - MINIO_ACCESS_KEY=dataflower
+      - MINIO_SECRET_KEY=dataflower123
+      - MINIO_BUCKET=serverless-data
+    volumes:
+      - ../functions/recognizer/recognizer__adult/main.py:/app/main.py:ro
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 1.5G
+        reservations:
+          cpus: '0.5'
+          memory: 512M
+    restart: unless-stopped
+    command: ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8080"]
+    labels:
+      - "dataflower-type=function"
+      - "dataflower-function=recognizer__adult"
+      - "dataflower-node=node1"
+      - "dataflower-node-type=high-performance"
+      - "dataflower-replica=2"
+
+  recognizer-violence-node1-1:
+    build:
+      context: ../
+      dockerfile: functions/recognizer/recognizer__violence/Dockerfile
+    image: dataflower/recognizer__violence:latest
+    container_name: recognizer-violence-node1-1
+    networks:
+      dataflower-shared:
+      node1-network:
+        ipv4_address: 172.25.1.12
+    ports:
+      - "8003:8080"
+    environment:
+      - FUNCTION_NAME=recognizer__violence
+      - NODE_ID=node1
+      - POD_NAME=recognizer-violence-node1-1
+      - REDIS_HOST=dataflower_redis
+      - REDIS_PORT=6379
+      - MINIO_HOST=dataflower_minio
+      - MINIO_PORT=9000
+      - MINIO_ACCESS_KEY=dataflower
+      - MINIO_SECRET_KEY=dataflower123
+      - MINIO_BUCKET=serverless-data
+    volumes:
+      - ../functions/recognizer/recognizer__violence/main.py:/app/main.py:ro
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 1.5G
+        reservations:
+          cpus: '0.5'
+          memory: 768M
+    restart: unless-stopped
+    command: ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8080"]
+    labels:
+      - "dataflower-type=function"
+      - "dataflower-function=recognizer__violence"
+      - "dataflower-node=node1"
+      - "dataflower-node-type=high-performance"
+      - "dataflower-replica=1"
+
+  # ===== NODE 2: BALANCED NODE =====
+  # Good for general-purpose functions (upload, extract, translate)
+  
+  recognizer-upload-node2-1:
+    build:
+      context: ../
+      dockerfile: functions/recognizer/recognizer__upload/Dockerfile
+    image: dataflower/recognizer__upload:latest
+    container_name: recognizer-upload-node2-1
+    networks:
+      dataflower-shared:
+      node2-network:
+        ipv4_address: 172.25.2.10
+    ports:
+      - "8010:8080"
+    environment:
+      - FUNCTION_NAME=recognizer__upload
+      - NODE_ID=node2
+      - POD_NAME=recognizer-upload-node2-1
+      - REDIS_HOST=dataflower_redis
+      - REDIS_PORT=6379
+      - MINIO_HOST=dataflower_minio
+      - MINIO_PORT=9000
+      - MINIO_ACCESS_KEY=dataflower
+      - MINIO_SECRET_KEY=dataflower123
+      - MINIO_BUCKET=serverless-data
+    volumes:
+      - ../functions/recognizer/recognizer__upload/main.py:/app/main.py:ro
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 512M
+        reservations:
+          cpus: '0.5'
+          memory: 256M
+    restart: unless-stopped
+    command: ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8080"]
+    labels:
+      - "dataflower-type=function"
+      - "dataflower-function=recognizer__upload"
+      - "dataflower-node=node2"
+      - "dataflower-node-type=balanced"
+      - "dataflower-replica=1"
+
+  recognizer-upload-node2-2:
+    build:
+      context: ../
+      dockerfile: functions/recognizer/recognizer__upload/Dockerfile
+    image: dataflower/recognizer__upload:latest
+    container_name: recognizer-upload-node2-2
+    networks:
+      dataflower-shared:
+      node2-network:
+        ipv4_address: 172.25.2.11
+    ports:
+      - "8011:8080"
+    environment:
+      - FUNCTION_NAME=recognizer__upload
+      - NODE_ID=node2
+      - POD_NAME=recognizer-upload-node2-2
+      - REDIS_HOST=dataflower_redis
+      - REDIS_PORT=6379
+      - MINIO_HOST=dataflower_minio
+      - MINIO_PORT=9000
+      - MINIO_ACCESS_KEY=dataflower
+      - MINIO_SECRET_KEY=dataflower123
+      - MINIO_BUCKET=serverless-data
+    volumes:
+      - ../functions/recognizer/recognizer__upload/main.py:/app/main.py:ro
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 512M
+        reservations:
+          cpus: '0.5'
+          memory: 256M
+    restart: unless-stopped
+    command: ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8080"]
+    labels:
+      - "dataflower-type=function"
+      - "dataflower-function=recognizer__upload"
+      - "dataflower-node=node2"
+      - "dataflower-node-type=balanced"
+      - "dataflower-replica=2"
+
+  recognizer-upload-node2-3:
+    build:
+      context: ../
+      dockerfile: functions/recognizer/recognizer__upload/Dockerfile
+    image: dataflower/recognizer__upload:latest
+    container_name: recognizer-upload-node2-3
+    networks:
+      dataflower-shared:
+      node2-network:
+        ipv4_address: 172.25.2.12
+    ports:
+      - "8015:8080"
+    environment:
+      - FUNCTION_NAME=recognizer__upload
+      - NODE_ID=node2
+      - POD_NAME=recognizer-upload-node2-3
+      - REDIS_HOST=dataflower_redis
+      - REDIS_PORT=6379
+      - MINIO_HOST=dataflower_minio
+      - MINIO_PORT=9000
+      - MINIO_ACCESS_KEY=dataflower
+      - MINIO_SECRET_KEY=dataflower123
+      - MINIO_BUCKET=serverless-data
+    volumes:
+      - ../functions/recognizer/recognizer__upload/main.py:/app/main.py:ro
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 512M
+        reservations:
+          cpus: '0.5'
+          memory: 256M
+    restart: unless-stopped
+    command: ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8080"]
+    labels:
+      - "dataflower-type=function"
+      - "dataflower-function=recognizer__upload"
+      - "dataflower-node=node2"
+      - "dataflower-node-type=balanced"
+      - "dataflower-replica=3"
+
+  recognizer-extract-node2-1:
+    build:
+      context: ../
+      dockerfile: functions/recognizer/recognizer__extract/Dockerfile
+    image: dataflower/recognizer__extract:latest
+    container_name: recognizer-extract-node2-1
+    networks:
+      dataflower-shared:
+      node2-network:
+        ipv4_address: 172.25.2.13
+    ports:
+      - "8016:8080"
+    environment:
+      - FUNCTION_NAME=recognizer__extract
+      - NODE_ID=node2
+      - POD_NAME=recognizer-extract-node2-1
+      - REDIS_HOST=dataflower_redis
+      - REDIS_PORT=6379
+      - MINIO_HOST=dataflower_minio
+      - MINIO_PORT=9000
+      - MINIO_ACCESS_KEY=dataflower
+      - MINIO_SECRET_KEY=dataflower123
+      - MINIO_BUCKET=serverless-data
+    volumes:
+      - ../functions/recognizer/recognizer__extract/main.py:/app/main.py:ro
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 512M
+        reservations:
+          cpus: '0.5'
+          memory: 256M
+    restart: unless-stopped
+    command: ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8080"]
+    labels:
+      - "dataflower-type=function"
+      - "dataflower-function=recognizer__extract"
+      - "dataflower-node=node2"
+      - "dataflower-node-type=balanced"
+      - "dataflower-replica=1"
+
+  recognizer-extract-node2-2:
+    build:
+      context: ../
+      dockerfile: functions/recognizer/recognizer__extract/Dockerfile
+    image: dataflower/recognizer__extract:latest
+    container_name: recognizer-extract-node2-2
+    networks:
+      dataflower-shared:
+      node2-network:
+        ipv4_address: 172.25.2.14
+    ports:
+      - "8014:8080"
+    environment:
+      - FUNCTION_NAME=recognizer__extract
+      - NODE_ID=node2
+      - POD_NAME=recognizer-extract-node2-2
+      - REDIS_HOST=dataflower_redis
+      - REDIS_PORT=6379
+      - MINIO_HOST=dataflower_minio
+      - MINIO_PORT=9000
+      - MINIO_ACCESS_KEY=dataflower
+      - MINIO_SECRET_KEY=dataflower123
+      - MINIO_BUCKET=serverless-data
+    volumes:
+      - ../functions/recognizer/recognizer__extract/main.py:/app/main.py:ro
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 512M
+        reservations:
+          cpus: '0.5'
+          memory: 256M
+    restart: unless-stopped
+    command: ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8080"]
+    labels:
+      - "dataflower-type=function"
+      - "dataflower-function=recognizer__extract"
+      - "dataflower-node=node2"
+      - "dataflower-node-type=balanced"
+      - "dataflower-replica=2"
+
+  # ===== NODE 3: LIGHTWEIGHT NODE =====
+  # For lightweight functions (translate, censor, mosaic)
+  
+  recognizer-translate-node3-1:
+    build:
+      context: ../
+      dockerfile: functions/recognizer/recognizer__translate/Dockerfile
+    image: dataflower/recognizer__translate:latest
+    container_name: recognizer-translate-node3-1
+    networks:
+      dataflower-shared:
+      node3-network:
+        ipv4_address: 172.25.3.10
+    ports:
+      - "8020:8080"
+    environment:
+      - FUNCTION_NAME=recognizer__translate
+      - NODE_ID=node3
+      - POD_NAME=recognizer-translate-node3-1
+      - REDIS_HOST=dataflower_redis
+      - REDIS_PORT=6379
+      - MINIO_HOST=dataflower_minio
+      - MINIO_PORT=9000
+      - MINIO_ACCESS_KEY=dataflower
+      - MINIO_SECRET_KEY=dataflower123
+      - MINIO_BUCKET=serverless-data
+    volumes:
+      - ../functions/recognizer/recognizer__translate/main.py:/app/main.py:ro
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 256M
+        reservations:
+          cpus: '0.25'
+          memory: 128M
+    restart: unless-stopped
+    command: ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8080"]
+    labels:
+      - "dataflower-type=function"
+      - "dataflower-function=recognizer__translate"
+      - "dataflower-node=node3"
+      - "dataflower-node-type=lightweight"
+      - "dataflower-replica=1"
+
+  recognizer-censor-node3-1:
+    build:
+      context: ../
+      dockerfile: functions/recognizer/recognizer__censor/Dockerfile
+    image: dataflower/recognizer__censor:latest
+    container_name: recognizer-censor-node3-1
+    networks:
+      dataflower-shared:
+      node3-network:
+        ipv4_address: 172.25.3.11
+    ports:
+      - "8021:8080"
+    environment:
+      - FUNCTION_NAME=recognizer__censor
+      - NODE_ID=node3
+      - POD_NAME=recognizer-censor-node3-1
+      - REDIS_HOST=dataflower_redis
+      - REDIS_PORT=6379
+      - MINIO_HOST=dataflower_minio
+      - MINIO_PORT=9000
+      - MINIO_ACCESS_KEY=dataflower
+      - MINIO_SECRET_KEY=dataflower123
+      - MINIO_BUCKET=serverless-data
+    volumes:
+      - ../functions/recognizer/recognizer__censor/main.py:/app/main.py:ro
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 256M
+        reservations:
+          cpus: '0.25'
+          memory: 128M
+    restart: unless-stopped
+    command: ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8080"]
+    labels:
+      - "dataflower-type=function"
+      - "dataflower-function=recognizer__censor"
+      - "dataflower-node=node3"
+      - "dataflower-node-type=lightweight"
+      - "dataflower-replica=1"
+
+  recognizer-mosaic-node3-1:
+    build:
+      context: ../
+      dockerfile: functions/recognizer/recognizer__mosaic/Dockerfile
+    image: dataflower/recognizer__mosaic:latest
+    container_name: recognizer-mosaic-node3-1
+    networks:
+      dataflower-shared:
+      node3-network:
+        ipv4_address: 172.25.3.12
+    ports:
+      - "8022:8080"
+    environment:
+      - FUNCTION_NAME=recognizer__mosaic
+      - NODE_ID=node3
+      - POD_NAME=recognizer-mosaic-node3-1
+      - REDIS_HOST=dataflower_redis
+      - REDIS_PORT=6379
+      - MINIO_HOST=dataflower_minio
+      - MINIO_PORT=9000
+      - MINIO_ACCESS_KEY=dataflower
+      - MINIO_SECRET_KEY=dataflower123
+      - MINIO_BUCKET=serverless-data
+    volumes:
+      - ../functions/recognizer/recognizer__mosaic/main.py:/app/main.py:ro
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 256M
+        reservations:
+          cpus: '0.25'
+          memory: 128M
+    restart: unless-stopped
+    command: ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8080"]
+    labels:
+      - "dataflower-type=function"
+      - "dataflower-function=recognizer__mosaic"
+      - "dataflower-node=node3"
+      - "dataflower-node-type=lightweight"
+      - "dataflower-replica=1"
+
+  # ===== NODE 4: COMPUTE-OPTIMIZED NODE =====
+  # Optimized for mixed workloads with higher resource allocation
+  
+  recognizer-adult-node4-1:
+    build:
+      context: ../
+      dockerfile: functions/recognizer/recognizer__adult/Dockerfile
+    image: dataflower/recognizer__adult:latest
+    container_name: recognizer-adult-node4-1
+    networks:
+      dataflower-shared:
+      node4-network:
+        ipv4_address: 172.25.4.10
+    ports:
+      - "8030:8080"
+    environment:
+      - FUNCTION_NAME=recognizer__adult
+      - NODE_ID=node4
+      - POD_NAME=recognizer-adult-node4-1
+      - REDIS_HOST=dataflower_redis
+      - REDIS_PORT=6379
+      - MINIO_HOST=dataflower_minio
+      - MINIO_PORT=9000
+      - MINIO_ACCESS_KEY=dataflower
+      - MINIO_SECRET_KEY=dataflower123
+      - MINIO_BUCKET=serverless-data
+    volumes:
+      - ../functions/recognizer/recognizer__adult/main.py:/app/main.py:ro
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 3G
+        reservations:
+          cpus: '1.0'
+          memory: 1.5G
+    restart: unless-stopped
+    command: ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8080"]
+    labels:
+      - "dataflower-type=function"
+      - "dataflower-function=recognizer__adult"
+      - "dataflower-node=node4"
+      - "dataflower-node-type=compute-optimized"
+      - "dataflower-replica=1"
+
+  recognizer-violence-node4-1:
+    build:
+      context: ../
+      dockerfile: functions/recognizer/recognizer__violence/Dockerfile
+    image: dataflower/recognizer__violence:latest
+    container_name: recognizer-violence-node4-1
+    networks:
+      dataflower-shared:
+      node4-network:
+        ipv4_address: 172.25.4.11
+    ports:
+      - "8031:8080"
+    environment:
+      - FUNCTION_NAME=recognizer__violence
+      - NODE_ID=node4
+      - POD_NAME=recognizer-violence-node4-1
+      - REDIS_HOST=dataflower_redis
+      - REDIS_PORT=6379
+      - MINIO_HOST=dataflower_minio
+      - MINIO_PORT=9000
+      - MINIO_ACCESS_KEY=dataflower
+      - MINIO_SECRET_KEY=dataflower123
+      - MINIO_BUCKET=serverless-data
+    volumes:
+      - ../functions/recognizer/recognizer__violence/main.py:/app/main.py:ro
+    deploy:
+      resources:
+        limits:
+          cpus: '1.5'
+          memory: 2.5G
+        reservations:
+          cpus: '0.75'
+          memory: 1.25G
+    restart: unless-stopped
+    command: ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8080"]
+    labels:
+      - "dataflower-type=function"
+      - "dataflower-function=recognizer__violence"
+      - "dataflower-node=node4"
+      - "dataflower-node-type=compute-optimized"
+      - "dataflower-replica=1"
+
+  recognizer-extract-node4-1:
+    build:
+      context: ../
+      dockerfile: functions/recognizer/recognizer__extract/Dockerfile
+    image: dataflower/recognizer__extract:latest
+    container_name: recognizer-extract-node4-1
+    networks:
+      dataflower-shared:
+      node4-network:
+        ipv4_address: 172.25.4.12
+    ports:
+      - "8032:8080"
+    environment:
+      - FUNCTION_NAME=recognizer__extract
+      - NODE_ID=node4
+      - POD_NAME=recognizer-extract-node4-1
+      - REDIS_HOST=dataflower_redis
+      - REDIS_PORT=6379
+      - MINIO_HOST=dataflower_minio
+      - MINIO_PORT=9000
+      - MINIO_ACCESS_KEY=dataflower
+      - MINIO_SECRET_KEY=dataflower123
+      - MINIO_BUCKET=serverless-data
+    volumes:
+      - ../functions/recognizer/recognizer__extract/main.py:/app/main.py:ro
+    deploy:
+      resources:
+        limits:
+          cpus: '1.2'
+          memory: 2G
+        reservations:
+          cpus: '0.6' 
+          memory: 1G
+    restart: unless-stopped
+    command: ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8080"]
+    labels:
+      - "dataflower-type=function"
+      - "dataflower-function=recognizer__extract"
+      - "dataflower-node=node4"
+      - "dataflower-node-type=compute-optimized"
+      - "dataflower-replica=1"
+
+# Container Pool Summary:
+# Infrastructure: 1x Redis (6379), 1x MinIO (9000,9001) = 2 containers
+# Ditto Workers: 3x generic workers (5001-5003) = 3 containers
+# Node 1 (High-Performance): 2x adult (8001,8002), 1x violence (8003) = 3 containers
+# Node 2 (Balanced): 3x upload (8010,8011,8015), 2x extract (8016,8014) = 5 containers  
+# Node 3 (Lightweight): 1x translate (8020), 1x censor (8021), 1x mosaic (8022) = 3 containers
+# Node 4 (Compute-Optimized): 1x adult (8030), 1x violence (8031), 1x extract (8032) = 3 containers
+# Total: 19 containers (2 infra + 3 ditto workers + 14 function containers)
+# 
+# Port Allocation:
+# Infrastructure: Redis (6379), MinIO (9000,9001)
+# Ditto Workers: 5001-5003
+# Node 1: 8001-8003
+# Node 2: 8010-8016
+# Node 3: 8020-8022
+# Node 4: 8030-8032
+

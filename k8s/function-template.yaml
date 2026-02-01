@@ -1,0 +1,120 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: FUNCTION_NAME
+  namespace: serverless
+  labels:
+    app: FUNCTION_NAME
+    function-type: FUNCTION_TYPE
+    function-category: FUNCTION_CATEGORY
+    deployment-tier: function
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: FUNCTION_NAME
+      function-type: FUNCTION_TYPE
+  template:
+    metadata:
+      labels:
+        app: FUNCTION_NAME
+        function-type: FUNCTION_TYPE
+        function-category: FUNCTION_CATEGORY
+        deployment-tier: function
+        step: FUNCTION_STEP
+        version: v1
+    spec:
+      # Node affinity to control placement
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+            - matchExpressions:
+                              - key: node-type
+                  operator: In
+                  values:
+                  - "node-1"  # Can be modified per function
+              - key: node-tier
+                operator: In
+                values:
+                - "standard"
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 100
+            podAffinityTerm:
+              labelSelector:
+                matchExpressions:
+                - key: function-type
+                  operator: In
+                  values:
+                  - FUNCTION_TYPE
+              topologyKey: kubernetes.io/hostname
+      containers:
+      - name: function
+        image: FUNCTION_IMAGE:latest
+        imagePullPolicy: Never
+        ports:
+        - containerPort: 8000
+          name: http
+        env:
+        - name: NODE_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: spec.nodeName
+        - name: POD_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.name
+        - name: FUNCTION_TYPE
+          value: FUNCTION_TYPE
+        - name: FUNCTION_CATEGORY
+          value: FUNCTION_CATEGORY
+        - name: FUNCTION_STEP
+          value: FUNCTION_STEP
+        resources:
+          requests:
+            memory: "256Mi"
+            cpu: "200m"
+          limits:
+            memory: "512Mi"
+            cpu: "500m"
+        volumeMounts:
+        - name: function-code
+          mountPath: /app
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8000
+          initialDelaySeconds: 30
+          periodSeconds: 10
+        readinessProbe:
+          httpGet:
+            path: /ready
+            port: 8000
+          initialDelaySeconds: 5
+          periodSeconds: 5
+      volumes:
+      - name: function-code
+        hostPath:
+          path: /host/functions/FUNCTION_PATH
+          type: Directory
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: FUNCTION_NAME
+  namespace: serverless
+  labels:
+    app: FUNCTION_NAME
+    function-type: FUNCTION_TYPE
+    function-category: FUNCTION_CATEGORY
+    service-tier: function
+spec:
+  selector:
+    app: FUNCTION_NAME
+    function-type: FUNCTION_TYPE
+  ports:
+  - port: 8000
+    targetPort: 8000
+    name: http
+  type: ClusterIP

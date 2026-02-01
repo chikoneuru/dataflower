@@ -1,0 +1,11 @@
+# Docker Compose for FaasPRS Scheduler
+# Uses warm function containers from docker-compose-warm-pools.yml
+
+networks:
+  dataflower-shared:
+    external: true
+    name: docker_dataflower-shared
+
+services:
+  # FaasPRS scheduler uses existing function containers from warm-pools
+  # No additional services needed - just reference the shared network

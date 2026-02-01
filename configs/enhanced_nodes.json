@@ -1,0 +1,178 @@
+{
+  "cluster_config": {
+    "nodes": [
+      {
+        "node_id": "node1",
+        "labels": {
+          "zone": "us-west-1a",
+          "region": "us-west-1",
+          "node-type": "high-performance",
+          "security-zone": "production",
+          "storage-type": "ssd",
+          "isolated": "false"
+        },
+        "constraints": {
+          "min_cpu_cores": 8,
+          "min_memory_gb": 16.0,
+          "max_cpu_utilization": 0.8,
+          "max_memory_utilization": 0.85,
+          "min_network_bandwidth": 1000.0,
+          "max_network_latency": 50.0,
+          "min_disk_space_gb": 100.0,
+          "requires_ssd": true,
+          "security_zone": "production",
+          "requires_isolation": false
+        },
+        "hardware": {
+          "cpu_cores": 16,
+          "cpu_frequency": 3.2,
+          "memory_total": 32.0,
+          "disk_total": 500.0,
+          "network_bandwidth": 10000.0
+        }
+      },
+      {
+        "node_id": "node2", 
+        "labels": {
+          "zone": "us-west-1b",
+          "region": "us-west-1",
+          "node-type": "balanced",
+          "security-zone": "staging",
+          "storage-type": "hdd",
+          "isolated": "false"
+        },
+        "constraints": {
+          "min_cpu_cores": 4,
+          "min_memory_gb": 8.0,
+          "max_cpu_utilization": 0.9,
+          "max_memory_utilization": 0.9,
+          "min_network_bandwidth": 1000.0,
+          "max_network_latency": 100.0,
+          "min_disk_space_gb": 50.0,
+          "requires_ssd": false,
+          "security_zone": "staging",
+          "requires_isolation": false
+        },
+        "hardware": {
+          "cpu_cores": 8,
+          "cpu_frequency": 2.8,
+          "memory_total": 16.0,
+          "disk_total": 200.0,
+          "network_bandwidth": 1000.0
+        }
+      },
+      {
+        "node_id": "node3",
+        "labels": {
+          "zone": "us-west-1c",
+          "region": "us-west-1", 
+          "node-type": "lightweight",
+          "security-zone": "development",
+          "storage-type": "hdd",
+          "isolated": "true"
+        },
+        "constraints": {
+          "min_cpu_cores": 2,
+          "min_memory_gb": 4.0,
+          "max_cpu_utilization": 0.95,
+          "max_memory_utilization": 0.95,
+          "min_network_bandwidth": 100.0,
+          "max_network_latency": 200.0,
+          "min_disk_space_gb": 20.0,
+          "requires_ssd": false,
+          "security_zone": "development", 
+          "requires_isolation": true
+        },
+        "hardware": {
+          "cpu_cores": 4,
+          "cpu_frequency": 2.4,
+          "memory_total": 8.0,
+          "disk_total": 100.0,
+          "network_bandwidth": 1000.0
+        }
+      }
+    ]
+  },
+  "function_profiles": {
+    "recognizer__adult": {
+      "memory_requirement": 0.5,
+      "cpu_requirement": 0.5,
+      "estimated_compute_time": 0.3,
+      "disk_requirement": 0.1,
+      "network_requirement": 100.0,
+      "constraints": {
+        "min_cpu_cores": 2,
+        "min_memory_gb": 4.0,
+        "max_cpu_utilization": 0.8,
+        "security_zone": null,
+        "requires_isolation": false
+      }
+    },
+    "recognizer__violence": {
+      "memory_requirement": 0.5,
+      "cpu_requirement": 0.5,
+      "estimated_compute_time": 0.4,
+      "disk_requirement": 0.1,
+      "network_requirement": 100.0,
+      "constraints": {
+        "min_cpu_cores": 2,
+        "min_memory_gb": 4.0,
+        "max_cpu_utilization": 0.8,
+        "security_zone": null,
+        "requires_isolation": false
+      }
+    },
+    "recognizer__upload": {
+      "memory_requirement": 0.2,
+      "cpu_requirement": 0.2,
+      "estimated_compute_time": 0.1,
+      "disk_requirement": 1.0,
+      "network_requirement": 500.0,
+      "constraints": {
+        "min_cpu_cores": 1,
+        "min_memory_gb": 2.0,
+        "max_cpu_utilization": 0.9,
+        "min_disk_space_gb": 5.0,
+        "security_zone": null,
+        "requires_isolation": false
+      }
+    },
+    "recognizer__extract": {
+      "memory_requirement": 0.3,
+      "cpu_requirement": 0.3,
+      "estimated_compute_time": 0.2,
+      "disk_requirement": 0.2,
+      "network_requirement": 200.0,
+      "constraints": {
+        "min_cpu_cores": 1,
+        "min_memory_gb": 2.0,
+        "max_cpu_utilization": 0.85,
+        "security_zone": null,
+        "requires_isolation": false
+      }
+    }
+  },
+  "placement_policies": {
+    "default": {
+      "strategy": "cost_aware",
+      "enable_constraint_checking": true,
+      "enable_real_resource_monitoring": true,
+      "resource_update_interval": 30,
+      "placement_timeout": 10.0
+    },
+    "high_performance": {
+      "strategy": "performance_first",
+      "enable_constraint_checking": true,
+      "enable_real_resource_monitoring": true,
+      "resource_update_interval": 10,
+      "placement_timeout": 5.0,
+    },
+    "cost_optimized": {
+      "strategy": "cost_first", 
+      "enable_constraint_checking": true,
+      "enable_real_resource_monitoring": false,
+      "resource_update_interval": 60,
+      "placement_timeout": 30.0,
+    }
+  }
+}
