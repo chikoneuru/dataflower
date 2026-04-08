@@ -7,7 +7,7 @@
 
   "remote_storage": {
     "type": "minio",
-    "minio_host": "minio",
+    "minio_host": "localhost",
     "minio_port": 9000,
     "access_key": "dataflower",
     "secret_key": "dataflower123",

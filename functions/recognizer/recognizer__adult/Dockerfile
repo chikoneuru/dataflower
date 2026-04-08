@@ -3,7 +3,7 @@ FROM python:3.11-slim
 WORKDIR /app
 
 # Copy TensorFlow cache if it exists (prevents timeout during build)
-COPY .tmp/tensorflow_cache /tmp/tensorflow_cache
+# COPY .tmp/tensorflow_cache /tmp/tensorflow_cache
 COPY .tmp/python_pkgs_whls /tmp/python_pkgs_whls
 
 # Copy only the model file (static data)
@@ -21,7 +21,7 @@ COPY functions/recognizer/recognizer__adult/main.py /app/main.py
 # Install other dependencies (will use cache if available)
 COPY functions/recognizer/recognizer__adult/requirements.txt /app/requirements.txt
 
-RUN pip install --no-cache-dir /tmp/tensorflow_cache/*.whl
+# RUN pip install --no-cache-dir /tmp/tensorflow_cache/*.whl
 
 RUN pip install --no-cache-dir \
     --find-links /tmp/python_pkgs_whls/ \

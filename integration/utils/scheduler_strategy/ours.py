@@ -14,16 +14,20 @@ logger = logging.getLogger(__name__)
 class OurScheduler(SchedulerInterface):
     """Our advanced scheduler implementation"""
     
-    def __init__(self):
+    def __init__(self, refinement_time_cap_sec: float = 0.02):
         self.orchestrator = None
         self.container_manager = None
+        self.refinement_time_cap_sec = refinement_time_cap_sec
         
     def initialize(self, container_manager: FunctionContainerManager) -> bool:
         """Initialize our scheduler"""
         try:
             self.container_manager = container_manager
             # Share the FunctionContainerManager so resource reporting matches FaasPRS
-            self.orchestrator = FunctionOrchestrator(container_manager=self.container_manager)
+            self.orchestrator = FunctionOrchestrator(
+                container_manager=self.container_manager,
+                refinement_time_cap_sec=self.refinement_time_cap_sec
+            )
             return True
         except Exception as e:
             logger.error(f"Failed to initialize our scheduler: {e}")

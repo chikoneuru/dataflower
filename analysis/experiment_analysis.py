@@ -122,7 +122,7 @@ def _scenario_prefix_map(name: str) -> Optional[str]:
         "vary-concurrency": "vary-concurrency_",
         "vary-firingrate": "vary-firingrate_",
         "vary-input": "vary-input_",
-        "vary-input-seq": "vary-input-seq_",
+        # "vary-input-seq": "vary-input-seq_",
         "burst-spike": "burst-spike_",
         "small-msgs": "small-msgs_",
     }
@@ -135,7 +135,7 @@ def _scenario_variable_key(name: str) -> Optional[str]:
         "vary-concurrency": "concurrency_level",
         "vary-firingrate": "request_rate_per_sec",
         "vary-input": "input_size_mb",
-        "vary-input-seq": "input_size_mb",
+        # "vary-input-seq": "input_size_mb",
         "small-msgs": "input_size_mb",
         "baseline-cleannet": None,
         "burst-spike": None,  # multi-varied; skip series for now
@@ -606,7 +606,7 @@ def _plot_scheduler_comparison_faceted(
         "vary-concurrency": "Varying Concurrency: Scheduler Comparison",
         "vary-firingrate": "Varying Firing Rate: Scheduler Comparison",
         "vary-input": "Varying Input Size: Scheduler Comparison",
-        "vary-input-seq": "Sequential Varying Input Size: Scheduler Comparison",
+        # "vary-input-seq": "Sequential Varying Input Size: Scheduler Comparison",
         "burst-spike": "Burst Spike: Scheduler Comparison",
         "small-msgs": "Small Messages: Scheduler Comparison",
     }
@@ -691,7 +691,7 @@ def _plot_scenario_series(points: List[Dict[str, Any]], var_key: str, out_dir: s
         "vary-concurrency": "Varying Concurrency: Performance vs Concurrency Level",
         "vary-firingrate": "Varying Firing Rate: Performance vs Request Rate",
         "vary-input": "Varying Input Size: Performance vs Input Size",
-        "vary-input-seq": "Sequential Varying Input Size: Performance vs Input Size",
+        # "vary-input-seq": "Sequential Varying Input Size: Performance vs Input Size",
         "burst-spike": "Burst Spike: Performance vs Parameter",
         "small-msgs": "Small Messages: Performance vs Input Size",
     }
@@ -921,7 +921,7 @@ def main() -> int:
         "--scenario",
         default="all",
         help=(
-            "Scenario to load (baseline-cleannet, vary-input, vary-input-seq, vary-concurrency, "
+            "Scenario to load (baseline-cleannet, vary-input, vary-concurrency, " # vary-input-seq
             "vary-firingrate, burst-spike, small-msgs, all)"
         ),
     )
@@ -931,7 +931,7 @@ def main() -> int:
     all_scenarios = [
         "baseline-cleannet",
         "vary-input",
-        "vary-input-seq",
+        # "vary-input-seq",
         "vary-concurrency",
         "vary-firingrate",
         "burst-spike",

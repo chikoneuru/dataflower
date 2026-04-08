@@ -49,7 +49,9 @@ class FunctionOrchestrator:
     4. Handles function lifecycle (deploy, scale, cleanup)
     """
     
-    def __init__(self, config: Optional[SystemConfig] = None, container_manager: Optional[FunctionContainerManager] = None):
+    def __init__(self, config: Optional[SystemConfig] = None, 
+                 container_manager: Optional[FunctionContainerManager] = None,
+                 refinement_time_cap_sec: float = 0.02):
         # Configuration
         if config:
             self.config = config
@@ -84,6 +86,7 @@ class FunctionOrchestrator:
         
         # Initialize scheduling timings dictionary
         self._scheduling_timings = {}
+        self.refinement_time_cap_sec = refinement_time_cap_sec
         
         # Setup logging and components
         self._setup_logging()
@@ -839,6 +842,7 @@ class FunctionOrchestrator:
             available_nodes = self.function_container_manager._find_nodes_with_capacity(cpu_requirement, memory_requirement)
             
             if not available_nodes:
+                print(f"[LNS] skipped for {function_name}: no available nodes with sufficient capacity")
                 return None
             
             # If we have cost models, use them to find the best node
@@ -880,16 +884,66 @@ class FunctionOrchestrator:
             if placement_config.get('default_strategy') != 'targeted_lns':
                 return None  # Skip LNS if not configured
             
-            # Get current runtime state
-            available_nodes = self.function_container_manager.get_nodes()
             existing_containers = self._get_existing_containers_map()
             
+            task_profile = self.cost_models.get_task_profile(function_name)
+            cpu_requirement = task_profile.cpu_intensity if task_profile else 1.0
+            memory_requirement = task_profile.memory_requirement if task_profile else 512
+
+            # Resolve actual refinement budget.
+            # Priority:
+            #   1) experiment/scenario override via self.refinement_time_cap_sec
+            #   2) config placement.targeted_lns.time_budget_ms
+            #   3) hard default = 20 ms
+            # time_budget_ms = int(self.refinement_time_cap_sec * 1000) if self.refinement_time_cap_sec is not None else placement_config.get('targeted_lns', {}).get('time_budget_ms', 20)
+            # self.logger.info(f"Targeted LNS refinement budget for {function_name}: {time_budget_ms} ms")
+
+            config_budget_ms = placement_config.get('targeted_lns', {}).get('time_budget_ms', 20)
+            if self.refinement_time_cap_sec is not None:
+                try:
+                    time_budget_ms = max(1, int(float(self.refinement_time_cap_sec) * 1000.0))
+                except Exception:
+                    time_budget_ms = config_budget_ms
+            else:
+                time_budget_ms = config_budget_ms
+
+            self.logger.info(
+                f"[LNS] refinement budget for {function_name} "
+                f"(request={request_id}): {time_budget_ms} ms "
+                f"(scenario_cap_sec={self.refinement_time_cap_sec}, config_budget_ms={config_budget_ms})"
+            )
+
+            # Get current runtime state
+            # available_nodes = self.function_container_manager.get_nodes()
+            available_nodes = self.function_container_manager.find_nodes_with_capacity(
+                cpu_requirement,
+                memory_requirement
+            )
+
+            if not available_nodes:
+                self.logger.info(
+                    f"[LNS] skipped for {function_name}: no available nodes with sufficient capacity "
+                    f"(cpu={cpu_requirement}, mem={memory_requirement})"
+                )
+                return None
+
             # Create placement request for LNS
+            # placement_request = PlacementRequest(
+            #     function_name=function_name,
+            #     cpu_requirement=1.0,
+            #     memory_requirement=512,
+            #     time_budget_ms=time_budget_ms,
+            #     # Add DAG context if available
+            #     parent_tasks=self._get_parent_tasks(function_name),
+            #     dag_structure=self._get_dag_structure(function_name)
+            # )
+
             placement_request = PlacementRequest(
                 function_name=function_name,
-                cpu_requirement=1.0,
-                memory_requirement=512,
-                time_budget_ms=placement_config.get('targeted_lns', {}).get('time_budget_ms', 20),
+                cpu_requirement=cpu_requirement,
+                memory_requirement=memory_requirement,
+                time_budget_ms=time_budget_ms,
+                priority=1,
                 # Add DAG context if available
                 parent_tasks=self._get_parent_tasks(function_name),
                 dag_structure=self._get_dag_structure(function_name)
@@ -911,8 +965,24 @@ class FunctionOrchestrator:
                 ]
                 
                 if optimized_containers:
-                    self.logger.info(f"LNS refinement: routing {function_name} to optimized node {lns_result.target_node}")
+                    # self.logger.info(f"LNS refinement: routing {function_name} to optimized node {lns_result.target_node}")
+                    self.logger.info(
+                        f"[LNS] refinement selected optimized node for {function_name}: "
+                        f"{lns_result.target_node} "
+                        f"(budget={time_budget_ms} ms, candidates={len(available_containers)}, "
+                        f"optimized_candidates={len(optimized_containers)})"
+                    )
                     return optimized_containers
+
+                self.logger.info(
+                    f"[LNS] placement returned node {lns_result.target_node} for {function_name}, "
+                    f"but no matching container was found among current candidates"
+                )
+
+            self.logger.info(
+                f"[LNS] no optimization applied for {function_name}; using original candidate set "
+                f"(budget={time_budget_ms} ms, candidates={len(available_containers)})"
+            )
             
             return None  # No optimization found, use original containers
             

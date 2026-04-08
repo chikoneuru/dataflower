@@ -103,6 +103,9 @@ class FunctionOrchestrator:
         self._dag_executor = DAGExecutor(self)
         
         self.logger.info(f"Palette orchestrator initialized with {self.num_buckets} buckets")
+
+        self._local_persistence_available = None
+        self._local_persistence_warned = False
     
     @contextmanager
     def _time_operation(self, timeline: Dict, operation_name: str):
@@ -506,38 +509,38 @@ class FunctionOrchestrator:
 
                 # Determine if this node should retrieve input from storage (prefer local, fallback to MinIO)
                 storage_context: Optional[Dict] = None
-                try:
-                    dependencies = execution_graph.get('dependencies', {}).get(task_id, [])
-                    if dependencies:
-                        # Pick the correct dependency based on function input semantics
-                        dependency = dependencies[0]
-                        if function_name in {'recognizer__adult', 'recognizer__violence', 'recognizer__extract', 'recognizer__mosaic'}:
-                            # Image consumers should read from upload's output when available
-                            if 'recognizer__upload' in dependencies:
-                                dependency = 'recognizer__upload'
-                        elif function_name == 'recognizer__translate':
-                            if 'recognizer__extract' in dependencies:
-                                dependency = 'recognizer__extract'
-                        elif function_name == 'recognizer__censor':
-                            if 'recognizer__translate' in dependencies:
-                                dependency = 'recognizer__translate'
+                # try:
+                #     dependencies = execution_graph.get('dependencies', {}).get(task_id, [])
+                #     if dependencies:
+                #         # Pick the correct dependency based on function input semantics
+                #         dependency = dependencies[0]
+                #         if function_name in {'recognizer__adult', 'recognizer__violence', 'recognizer__extract', 'recognizer__mosaic'}:
+                #             # Image consumers should read from upload's output when available
+                #             if 'recognizer__upload' in dependencies:
+                #                 dependency = 'recognizer__upload'
+                #         elif function_name == 'recognizer__translate':
+                #             if 'recognizer__extract' in dependencies:
+                #                 dependency = 'recognizer__extract'
+                #         elif function_name == 'recognizer__censor':
+                #             if 'recognizer__translate' in dependencies:
+                #                 dependency = 'recognizer__translate'
 
-                        storage_key = f"{request_id}_{dependency}"
-                        # Local relative path pattern under /mnt/node_data
-                        # File name includes node id on writer side; readers will try their own node id first
-                        local_rel_dir = f"{request_id}"
-                        storage_context = {
-                            'src': 'local',
-                            'input_key': storage_key,
-                            'path': local_rel_dir,  # directory only; file is resolved in container by node id
-                            'storage_config': get_minio_storage_config(),
-                        }
-                        # When using storage, do not pass inline payload
-                        input_data = None
-                        self._debug(f"Palette: {function_name} will retrieve input from storage key: {storage_key}")
-                except Exception as e:
-                    self._debug(f"Palette storage-context setup error for {function_name}: {e}")
-                    storage_context = None
+                #         storage_key = f"{request_id}_{dependency}"
+                #         # Local relative path pattern under /mnt/node_data
+                #         # File name includes node id on writer side; readers will try their own node id first
+                #         local_rel_dir = f"{request_id}"
+                #         storage_context = {
+                #             'src': 'local',
+                #             'input_key': storage_key,
+                #             'path': local_rel_dir,  # directory only; file is resolved in container by node id
+                #             'storage_config': get_minio_storage_config(),
+                #         }
+                #         # When using storage, do not pass inline payload
+                #         input_data = None
+                #         self._debug(f"Palette: {function_name} will retrieve input from storage key: {storage_key}")
+                # except Exception as e:
+                #     self._debug(f"Palette storage-context setup error for {function_name}: {e}")
+                #     storage_context = None
 
                 # Input source debug (colored): remote (cyan), local (green), direct (yellow)
                 try:
@@ -555,9 +558,13 @@ class FunctionOrchestrator:
                             self.logger.info(
                                 f"\033[93mPalette: {function_name} receiving input via direct data passing\033[0m"
                             )
+                        else:
+                            self.logger.info(
+                                f"\033[93mPalette: {function_name} receiving dependency-resolved input from DAGExecutor\033[0m"
+                            )
                 except Exception:
                     pass
-                
+
                 # Invoke function using Palette's bucket-based routing with color hint
                 try:
                     result = self.invoke_function(function_name, request_id, input_data, color_hint, storage_context)
@@ -958,10 +965,16 @@ class FunctionOrchestrator:
         """
         self.logger.info(f"DEBUG: _persist_function_output called for {function_name} with workflow_request_id: {workflow_request_id}")
         try:
-            import pathlib, json
+            import json
+            import os
+            import pathlib
+            import time
+            from provider.data_manager import DataMetadata
+
             shared_volume_root = '/mnt/node_data'
+
             exp_dir = pathlib.Path(shared_volume_root) / workflow_request_id
-            exp_dir.mkdir(parents=True, exist_ok=True)
+            # exp_dir.mkdir(parents=True, exist_ok=True)
 
             local_filename = f"{workflow_request_id}_{function_name}_{node_id}.json"
             local_path = exp_dir / local_filename
@@ -970,69 +983,101 @@ class FunctionOrchestrator:
             serializable = result_payload
             if not isinstance(serializable, (dict, list, str, int, float, bool)) and serializable is not None:
                 try:
+                    if isinstance(serializable, (bytes, bytearray)):
+                        serializable = serializable.decode("utf-8", errors="replace")
                     serializable = json.loads(serializable)
                 except Exception:
                     serializable = str(serializable)
 
-            try:
-                with open(local_path, 'w', encoding='utf-8') as f:
-                    if isinstance(serializable, (dict, list)):
-                        json.dump(serializable, f, ensure_ascii=False)
-                    else:
-                        f.write(str(serializable))
-                self.logger.info(f"\033[92mSaved local output (local storage): {local_path}\033[0m")
-                # DEBUG: verify inside docker volume for this node
+            if self._local_persistence_available is None:
+                self._local_persistence_available = (
+                    os.path.isdir(shared_volume_root)
+                    and os.access(shared_volume_root, os.W_OK | os.X_OK)
+                )
+                if not self._local_persistence_available and not self._local_persistence_warned:
+                    self.logger.warning(
+                        f"Local persistence disabled: shared volume not writable "
+                        f"({shared_volume_root}); using remote storage only"
+                    )
+                    self._local_persistence_warned = True
+
+            if self._local_persistence_available:
                 try:
-                    if self.logger.isEnabledFor(logging.DEBUG):
-                        import docker
-                        dclient = docker.from_env()
-                        container_path = f"/mnt/node_data/{workflow_request_id}/{local_filename}"
-                        # candidate volume names: nodeX_data or docker_nodeX_data
-                        volume_candidates = [f"{node_id}_data", f"docker_{node_id}_data"]
-                        volume_name = None
-                        try:
-                            for v in dclient.volumes.list():
-                                vname = getattr(v, 'name', '') or (v.attrs.get('Name') if hasattr(v, 'attrs') else '')
-                                if not vname:
-                                    continue
-                                if any(vname.endswith(c) or vname == c for c in volume_candidates):
-                                    volume_name = vname
-                                    break
-                        except Exception as ve:
-                            self.logger.debug(f"Volume enumeration failed: {ve}")
-                        if volume_name:
-                            cmd = f"sh -c 'stat -c %s {container_path} 2>/dev/null || echo MISS'"
-                            try:
-                                out = dclient.containers.run(
-                                    image='alpine:3.18',
-                                    command=cmd,
-                                    remove=True,
-                                    network_disabled=True,
-                                    volumes={volume_name: {'bind': '/mnt/node_data', 'mode': 'ro'}},
-                                )
-                                s = out.decode('utf-8', errors='ignore').strip()
-                                if s and s != 'MISS':
-                                    self.logger.debug(f"Docker volume verified: volume={volume_name} size={s} path={container_path}")
-                                else:
-                                    self.logger.debug(f"Docker volume check MISS: volume={volume_name} path={container_path}")
-                            except Exception as re:
-                                self.logger.debug(f"Docker run verification failed for {volume_name}: {re}")
+                    exp_dir.mkdir(parents=True, exist_ok=True)
+                    with open(local_path, 'w', encoding='utf-8') as f:
+                        if isinstance(serializable, (dict, list)):
+                            json.dump(serializable, f, ensure_ascii=False)
                         else:
-                            self.logger.debug(f"No docker volume matched for node {node_id} (candidates: {volume_candidates})")
-                except Exception as ve:
-                    self.logger.debug(f"Docker volume verification error: {ve}")
-            except Exception as e:
-                self.logger.warning(f"Failed to write local output {local_path}: {e}")
+                            f.write(str(serializable))
+                    self.logger.info(f"\033[92mSaved local output (local storage): {local_path}\033[0m")
+
+                    # Docker verify giữ nguyên nhưng chỉ khi DEBUG
+                    try:
+                        import logging
+                        if self.logger.isEnabledFor(logging.DEBUG):
+                            import docker
+                            dclient = docker.from_env()
+                            container_path = f"/mnt/node_data/{workflow_request_id}/{local_filename}"
+                            # candidate volume names: nodeX_data or docker_nodeX_data
+                            volume_candidates = [f"{node_id}_data", f"docker_{node_id}_data"]
+                            volume_name = None
+                            try:
+                                for v in dclient.volumes.list():
+                                    vname = getattr(v, 'name', '') or (v.attrs.get('Name') if hasattr(v, 'attrs') else '')
+                                    if not vname:
+                                        continue
+                                    if any(vname.endswith(c) or vname == c for c in volume_candidates):
+                                        volume_name = vname
+                                        break
+                            except Exception as ve:
+                                self.logger.debug(f"Volume enumeration failed: {ve}")
+                            if volume_name:
+                                cmd = f"sh -c 'stat -c %s {container_path} 2>/dev/null || echo MISS'"
+                                try:
+                                    out = dclient.containers.run(
+                                        image='alpine:3.18',
+                                        command=cmd,
+                                        remove=True,
+                                        network_disabled=True,
+                                        volumes={volume_name: {'bind': '/mnt/node_data', 'mode': 'ro'}},
+                                    )
+                                    s = out.decode('utf-8', errors='ignore').strip()
+                                    if s and s != 'MISS':
+                                        self.logger.debug(f"Docker volume verified: volume={volume_name} size={s} path={container_path}")
+                                    else:
+                                        self.logger.debug(f"Docker volume check MISS: volume={volume_name} path={container_path}")
+                                except Exception as re:
+                                    self.logger.debug(f"Docker run verification failed for {volume_name}: {re}")
+                            else:
+                                self.logger.debug(f"No docker volume matched for node {node_id} (candidates: {volume_candidates})")
+                    except Exception as ve:
+                        self.logger.debug(f"Docker volume verification error: {ve}")
+                        
+                except Exception as e:
+                    # Downgrade repeated local persistence failures to debug after first detection
+                    if not self._local_persistence_warned:
+                        self.logger.warning(
+                            f"Local persistence failed for {local_path}: {e}; switching to remote-only mode"
+                        )
+                        self._local_persistence_warned = True
+                    else:
+                        self.logger.debug(f"Local persistence skipped/failed for {local_path}: {e}")
+
+                    self._local_persistence_available = False
+            else:
+                self.logger.debug(
+                    f"Skipping local persistence for {function_name}: shared volume unavailable"
+                )
 
             if self.remote_storage_adapter is not None:
                 try:
                     size_bytes = 0
+                    data_to_store = serializable
                     try:
                         payload_bytes = json.dumps(serializable).encode('utf-8') if isinstance(serializable, (dict, list)) else str(serializable).encode('utf-8')
                         size_bytes = len(payload_bytes)
-                        data_to_store = serializable
                     except Exception:
-                        data_to_store = serializable
+                        pass
 
                     metadata = DataMetadata(
                         data_id=remote_data_id,

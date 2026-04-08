@@ -18,10 +18,11 @@ concurrency_levels:
 # Schedulers to compare
 schedulers:
   - "ours"           # Our advanced 2-phase scheduler
-
+  - "FaasPRS"
+  - "palette"
 
 # Number of requests per experiment
-requests_per_experiment: 7
+requests_per_experiment: 10
 
 # Workflow to use
 workflow_name: "recognizer"
@@ -33,6 +34,9 @@ input_data:
   
   # If no input_file, synthetic data will be generated based on input_size_mb
   use_synthetic_data: true
+
+  # input_file: "data/test.png"
+  # use_synthetic_data: false
 
 # Experiment settings
 experiment_settings:

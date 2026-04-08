@@ -28,7 +28,7 @@ FUNCTION_TYPE="${4:-$PARENT_DIR}"
 FUNCTION_CATEGORY="${5:-$PARENT_DIR}"
 FUNCTION_STEP="${6:-process}"
 
-BASE_COMPOSE="docker-compose-multi-node.yml"
+BASE_COMPOSE="./docker/docker-compose-full-cluster.yml"
 
 if ! command -v docker &>/dev/null; then
   echo "❌ docker not found" >&2
@@ -44,16 +44,28 @@ if [ ! -f "$BASE_COMPOSE" ]; then
   exit 1
 fi
 
-# Check if base environment is running
-if ! docker network ls | grep -q "dataflower_shared_network"; then
+# # Check if base environment is running
+# if ! docker network ls | grep -q "dataflower_shared_network"; then
+#   echo "❌ Base environment not running. Please start it first:" >&2
+#   echo "   docker compose -f $BASE_COMPOSE up -d" >&2
+#   exit 1
+# fi
+
+# # Check if target node network exists
+# if ! docker network ls | grep -q "dataflower_${TARGET_NODE}_network"; then
+#   echo "❌ Target node network 'dataflower_${TARGET_NODE}_network' not found. Please start the base environment:" >&2
+#   echo "   docker compose -f $BASE_COMPOSE up -d" >&2
+#   exit 1
+# fi
+
+if ! docker network ls --format '{{.Name}}' | grep -q "^docker_dataflower-shared$"; then
   echo "❌ Base environment not running. Please start it first:" >&2
   echo "   docker compose -f $BASE_COMPOSE up -d" >&2
   exit 1
 fi
 
-# Check if target node network exists
-if ! docker network ls | grep -q "dataflower_${TARGET_NODE}_network"; then
-  echo "❌ Target node network 'dataflower_${TARGET_NODE}_network' not found. Please start the base environment:" >&2
+if ! docker network ls --format '{{.Name}}' | grep -q "^docker_${TARGET_NODE}-network$"; then
+  echo "❌ Target node network 'docker_${TARGET_NODE}-network' not found. Please start the base environment:" >&2
   echo "   docker compose -f $BASE_COMPOSE up -d" >&2
   exit 1
 fi
@@ -64,8 +76,8 @@ case "$TARGET_NODE" in
   *) echo "❌ Invalid node: $TARGET_NODE (expected node1|node2|node3|node4)" >&2; exit 1;;
 esac
 
-NODE_NETWORK_NAME="dataflower_${TARGET_NODE}_network"
-SHARED_NETWORK_NAME="dataflower_shared_network"
+NODE_NETWORK_NAME="docker_${TARGET_NODE}-network"
+SHARED_NETWORK_NAME="docker_dataflower-shared"
 
 # Resolve Dockerfile path - functions are organized as functions/<parent_dir>/<function_name>/Dockerfile
 DF_PATH="functions/${PARENT_DIR}/${FUNCTION_NAME}/Dockerfile"
@@ -119,11 +131,12 @@ ${PORT_MAPPING}
       - "deployment-tier=function"
 
 networks:
-  node1_network: { external: true, name: ${NODE_NETWORK_NAME/node1/${TARGET_NODE}} }
-  node2_network: { external: true, name: ${NODE_NETWORK_NAME/node2/${TARGET_NODE}} }
-  node3_network: { external: true, name: ${NODE_NETWORK_NAME/node3/${TARGET_NODE}} }
-  node4_network: { external: true, name: ${NODE_NETWORK_NAME/node4/${TARGET_NODE}} }
-  shared_network: { external: true, name: ${SHARED_NETWORK_NAME} }
+  ${TARGET_NODE}_network:
+    external: true
+    name: ${NODE_NETWORK_NAME}
+  shared_network:
+    external: true
+    name: ${SHARED_NETWORK_NAME}
 EOF
 
 echo "🚀 Deploying ${FUNCTION_NAME} to ${TARGET_NODE}"

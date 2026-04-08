@@ -230,14 +230,21 @@ class DAGExecutor:
         # Check if this function has dependencies
         dependencies = graph.get('dependencies', {}).get(function_name, [])
         
-        if not dependencies:
-            # No dependencies - this is a first function, should receive direct input
-            input_data = context.get('inputs', {}).get('img')
-            self._debug(f"\033[93m{function_name}: first function, no dependencies\033[0m")
-        else:
-            # Has dependencies - use storage-based execution
-            input_data = None
-            self._debug(f"\033[96m{function_name}: has dependencies: {dependencies}\033[0m")
+        # if not dependencies:
+        #     # No dependencies - this is a first function, should receive direct input
+        #     input_data = context.get('inputs', {}).get('img')
+        #     self._debug(f"\033[93m{function_name}: first function, no dependencies\033[0m")
+        # else:
+        #     # Has dependencies - use storage-based execution
+        #     input_data = None
+        #     self._debug(f"\033[96m{function_name}: has dependencies: {dependencies}\033[0m")
+        
+        # # Execute function using the orchestrator's invoke_function method
+        # result = self.orchestrator.invoke_function(function_name, function_request_id, input_data)
+
+        # Prepare input using shared helper (handles both first and dependent nodes)
+        input_data = self.prepare_input_for_node(function_name, graph, context, node_results)
+        self._debug(f"\033[96m{function_name}: prepared input type={type(input_data)}\033[0m")
         
         # Execute function using the orchestrator's invoke_function method
         result = self.orchestrator.invoke_function(function_name, function_request_id, input_data)
@@ -259,7 +266,9 @@ class DAGExecutor:
                 function_request_id = f"{request_id}_{function_name}"
                 
                 # For storage-based execution, don't pass input data - functions will retrieve from storage
-                input_data = None
+                # Prepare input using shared helper for each parallel node
+                input_data = self.prepare_input_for_node(function_name, graph, context, node_results)
+                self._debug(f"\033[96m{function_name} (parallel): prepared input type={type(input_data)}\033[0m")
                 
                 future = executor.submit(self.orchestrator.invoke_function, function_name, function_request_id, input_data)
                 future_to_node[future] = node_id
