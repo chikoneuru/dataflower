@@ -281,12 +281,13 @@ def store_output_locally(function_name: str, output_data: Any, input_ref: Option
             elif "request_id" in context:
                 request_prefix = context["request_id"]
         
-        # If no request_prefix found, log and return error without fallback
+        # If no request_prefix found, generate a safe fallback
         if not request_prefix:
-            err = "request_prefix is missing; refusing to fallback to timestamp"
-            print(f"[store_output_locally] ✗ ERROR: {err}")
-            logging.getLogger('container_api').error(err)
-            return None
+            request_prefix = f"req_{int(time.time() * 1000)}"
+            print(f"[store_output_locally] WARNING: request_prefix missing, using fallback: {request_prefix}")
+            logging.getLogger('container_api').warning(
+                f"request_prefix missing, using fallback: {request_prefix}"
+            )
         
         print(f"[store_output_locally] function_name={function_name}, request_prefix={request_prefix}")
         

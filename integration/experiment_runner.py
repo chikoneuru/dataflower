@@ -7,7 +7,7 @@ with various input sizes and concurrency levels. It removes all test components
 and uses real data and components.
 
 Features:
-- Multiple scheduler implementations (ours, FaasPRS, ditto)
+- Multiple scheduler implementations (ours, FaasPRS, Palette)
 - Configurable input sizes and concurrency levels
 - Real workflow execution with actual data
 - Comprehensive metrics collection
@@ -15,17 +15,17 @@ Features:
 - Scenario-based testing with specific bottleneck conditions
 
 Usage:
-- python experiment_runner.py                    # Standard experiments (scenario-based)
-- python experiment_runner.py smoke             # Smoke test (single small experiment for quick verification)
-- python experiment_runner.py test              # Test experiments (minimal)
-- python experiment_runner.py full              # Full test experiments
-- python experiment_runner.py scale             # Scale testing
-- python experiment_runner.py standard --override  # Override existing results
-- python experiment_runner.py --scenario help   # List available scenario names
+- python experiment_runner.py                           # Standard experiments (scenario-based)
+- python experiment_runner.py smoke                     # Smoke test (single small experiment for quick verification)
+- python experiment_runner.py test                      # Test experiments (minimal)
+- python experiment_runner.py full                      # Full test experiments
+- python experiment_runner.py scale                     # Scale testing
+- python experiment_runner.py standard --override       # Override existing results
+- python experiment_runner.py --scenario help           # List available scenario names
 - python experiment_runner.py --scenario Baseline-CleanNet
-- python experiment_runner.py -s baseline-cleannet,burst-spike
-- python experiment_runner.py --split-legacy    # Split old bundled result files into individual files
-- python experiment_runner.py --reorganize      # Comprehensive file reorganization (recommended)
+- python experiment_runner.py -s baseline-cleannet, burst-spike
+- python experiment_runner.py --split-legacy            # Split old bundled result files into individual files
+- python experiment_runner.py --reorganize              # Comprehensive file reorganization (recommended)
 
 Scenarios include (names for --scenario flag):
 - Baseline-CleanNet
@@ -45,6 +45,7 @@ import os
 import statistics
 import sys
 import time
+import random
 from dataclasses import asdict, dataclass
 from pathlib import Path
 import trace
@@ -52,6 +53,8 @@ from typing import Any, Dict, List, Optional, Protocol
 
 import yaml
 from PIL import Image
+
+LATENCY_OUTLIER_THRESHOLD_MS = 10_000  # 10 giây
 
 # Color codes for terminal output
 class Colors:
@@ -96,7 +99,7 @@ from integration.utils.scheduler_strategy import (
     SchedulerInterface,
     OurScheduler,
     FaasPRSScheduler,
-    DittoScheduler,
+    # DittoScheduler,
     PaletteScheduler,
 )
 
@@ -105,12 +108,12 @@ from .utils import *
 # Custom JSON encoder to handle non-serializable objects
 class CustomJSONEncoder(json.JSONEncoder):
     def default(self, obj):
-        # Handle TimeModel objects from Ditto scheduler
-        if hasattr(obj, '__class__') and obj.__class__.__name__ == 'TimeModel':
-            return {
-                'type': 'TimeModel',
-                'observed_times_ms': getattr(obj, 'observed_times_ms', {})
-            }
+        # # Handle TimeModel objects from Ditto scheduler
+        # if hasattr(obj, '__class__') and obj.__class__.__name__ == 'TimeModel':
+        #     return {
+        #         'type': 'TimeModel',
+        #         'observed_times_ms': getattr(obj, 'observed_times_ms', {})
+        #     }
         # Handle other non-serializable objects
         return super().default(obj)
 
@@ -152,8 +155,8 @@ logging.getLogger('scheduler.ours.placement').setLevel(logging.DEBUG if not supp
 logging.getLogger('scheduler.ours.routing').setLevel(logging.DEBUG if not suppress else logging.WARNING)
 logging.getLogger('scheduler.faaSPRS').setLevel(logging.DEBUG if not suppress else logging.WARNING)
 logging.getLogger('scheduler.faaSPRS.function_orchestrator').setLevel(logging.DEBUG if not suppress else logging.WARNING)
-logging.getLogger('scheduler.ditto').setLevel(logging.DEBUG if not suppress else logging.WARNING)
-logging.getLogger('scheduler.ditto.function_orchestrator').setLevel(logging.DEBUG if not suppress else logging.WARNING)
+# logging.getLogger('scheduler.ditto').setLevel(logging.DEBUG if not suppress else logging.WARNING)
+# logging.getLogger('scheduler.ditto.function_orchestrator').setLevel(logging.DEBUG if not suppress else logging.WARNING)
 logging.getLogger('scheduler.palette').setLevel(logging.DEBUG if not suppress else logging.WARNING)
 logging.getLogger('scheduler.palette.function_orchestrator').setLevel(logging.DEBUG if not suppress else logging.WARNING)
 
@@ -161,6 +164,30 @@ logging.getLogger('scheduler.palette.function_orchestrator').setLevel(logging.DE
 os.makedirs("results", exist_ok=True)
 os.makedirs("data", exist_ok=True)
 
+def infer_bottleneck_from_metrics(metrics: dict) -> str:
+    """
+    Từ dict timing metrics, suy ra bottleneck chính chiếm tỉ lệ cao nhất.
+    Trả về: 'Compute' | 'Network' | 'Queuing' | 'Scheduling' | 'Unknown'
+    """
+    timing = metrics.get("timing", metrics)  # hỗ trợ cả flat và nested dict
+    exec_ms   = timing.get("function_exec_avg_ms",      timing.get("functionexecavgms", 0)) or 0
+    net_ms    = timing.get("network_delay_avg_ms",      timing.get("networkdelayavgms", 0)) or 0
+    queue_ms  = timing.get("queuing_delay_avg_ms",      timing.get("queuingdelayavgms", 0)) or 0
+    sched_ms  = timing.get("scheduling_overhead_avg_ms",timing.get("schedulingoverheadavgms", 0)) or 0
+
+    total = exec_ms + net_ms + queue_ms + sched_ms
+    if total <= 0:
+        return "Unknown"
+
+    parts = {
+        "Compute":    exec_ms  / total,
+        "Network":    net_ms   / total,
+        "Queuing":    queue_ms / total,
+        "Scheduling": sched_ms / total,
+    }
+    dominant = max(parts, key=parts.get)
+    dominant_pct = parts[dominant] * 100
+    return f"{dominant} ({dominant_pct:.1f}%)"
 
 class ExperimentRunner:
     """Main experiment runner class"""
@@ -224,17 +251,24 @@ class ExperimentRunner:
             return False
     
     def load_input_data(self, config: ExperimentConfig) -> bytes:
-        """Load input data for the experiment"""
+        """Load input data for the experiment.
+
+        Rules:
+        - If config.input_file is provided, it must exist and be loaded successfully.
+        - Only fallback for debug/smoke mode when no explicit input_file is specified.
+        """
         if config.input_file:
             try:
                 with open(config.input_file, 'rb') as f:
                     data = f.read()
                 data_mb = len(data)/(1024**2)
                 data_kb = len(data)/1024
-                print(f"✅ Loaded input file: {data_mb:.2f} MB ({data_kb:.1f} KB)")
-                return data
+                print(f"✅ Loaded input file: {data_mb:.2f} MB ({data_kb:.1f} KB) from {config.input_file}")
+                return data 
             except Exception as e:
-                print(f"⚠️  Could not load input file {config.input_file}: {e}")
+                raise FileNotFoundError(
+                    f"Required input file could not be loaded: {config.input_file} ({e})"
+                )
         
         # Try to load a real test image first
         test_image_paths = ['data/test.png', 'data/small_test.png', 'test.png']
@@ -251,6 +285,8 @@ class ExperimentRunner:
                 print(f"⚠️  Could not load test image {path}: {e}")
                 continue
         
+        raise FileNotFoundError("No valid input file available for experiment.")
+        
         # Generate synthetic data based on size as fallback
         size_bytes = int(config.input_size_mb * 1024 * 1024)
         synthetic_data = b"X" * size_bytes
@@ -258,34 +294,53 @@ class ExperimentRunner:
         print(f"⚠️  Using synthetic data: {synthetic_kb:.1f} KB")
         return synthetic_data
     
-    def get_scheduler(self, scheduler_type: str) -> SchedulerInterface:
+    def get_scheduler(self, config) -> SchedulerInterface:
         """Get scheduler instance by type"""
         logging.getLogger('get_scheduler')
+
+        scheduler_type = config.scheduler_type if hasattr(config, 'scheduler_type') else config
+
         if scheduler_type not in self.schedulers:
             if scheduler_type == "ours":
-                scheduler = OurScheduler()
+                scheduler = OurScheduler(
+                    refinement_time_cap_sec=(config.refinement_time_cap_sec or 0.02)
+                    if hasattr(config, 'refinement_time_cap_sec') else 0.02
+                )
             elif scheduler_type == "FaasPRS":
-                scheduler = FaasPRSScheduler(
-                    container_manager=self.function_manager,
-                )
-            elif scheduler_type == "ditto":
-                scheduler = DittoScheduler()
+                scheduler = FaasPRSScheduler(container_manager=self.function_manager,)
             elif scheduler_type == "palette":
-                scheduler = PaletteScheduler(
-                    container_manager=self.function_manager,
-                )
+                scheduler = PaletteScheduler(container_manager=self.function_manager,)
             else:
                 raise ValueError(f"Unknown scheduler type: {scheduler_type}")
+
+        # if scheduler_type not in self.schedulers:
+        #     if scheduler_type == "ours":
+        #         scheduler = OurScheduler()
+        #     elif scheduler_type == "FaasPRS":
+        #         scheduler = FaasPRSScheduler(
+        #             container_manager=self.function_manager,
+        #         )
+        #     # elif scheduler_type == "ditto":
+        #     #     scheduler = DittoScheduler()
+        #     elif scheduler_type == "palette":
+        #         scheduler = PaletteScheduler(
+        #             container_manager=self.function_manager,
+        #         )
+        #     else:
+        #         raise ValueError(f"Unknown scheduler type: {scheduler_type}")
             
-            # Pass the appropriate manager to each scheduler
-            if scheduler_type == "ditto":
-                # Ditto needs the worker manager that has discovered workers
-                if not scheduler.initialize(self.worker_manager):
-                    raise Exception(f"Failed to initialize scheduler: {scheduler_type}")
-            else:
-                # Other schedulers (ours, FaasPRS, palette) use the function manager
-                if not scheduler.initialize(self.function_manager):
-                    raise Exception(f"Failed to initialize scheduler: {scheduler_type}")
+            # # Pass the appropriate manager to each scheduler
+            # if scheduler_type == "ditto":
+            #     # Ditto needs the worker manager that has discovered workers
+            #     if not scheduler.initialize(self.worker_manager):
+            #         raise Exception(f"Failed to initialize scheduler: {scheduler_type}")
+            # else:
+            #     # Other schedulers (ours, FaasPRS, palette) use the function manager
+            #     if not scheduler.initialize(self.function_manager):
+            #         raise Exception(f"Failed to initialize scheduler: {scheduler_type}")
+
+            if not scheduler.initialize(self.function_manager):
+                raise Exception(f"Failed to initialize scheduler: {scheduler_type}")
             
             # Register workflow if it's loaded
             if self.workflow_dag and hasattr(scheduler, 'orchestrator') and hasattr(scheduler.orchestrator, 'register_workflow'):
@@ -305,14 +360,35 @@ class ExperimentRunner:
                     print(f"⚠️  Failed to register workflow with {scheduler_type} scheduler: {e}")
             
             self.schedulers[scheduler_type] = scheduler
-        
+            # scheduler.initialize(self.function_manager)
+
+            if scheduler_type == "ours":
+                try:
+                    actual_cap = getattr(scheduler, "refinement_time_cap_sec", None)
+                    if actual_cap is not None:
+                        print(f"🧠 OurScheduler refinement cap: {actual_cap:.3f} s ({actual_cap * 1000.0:.1f} ms)")
+                except Exception:
+                    pass
+
+        # return scheduler
         return self.schedulers[scheduler_type]
     
-    def _run_workflow(self, scheduler, input_data: bytes, request_id: str):
+    def compute_transfer_delay_sec(self, data_len_bytes: int, bandwidth_mbps: float) -> float:
+        """Ước tính thời gian truyền data_len_bytes qua đường truyền bandwidth_mbps."""
+        if not bandwidth_mbps or bandwidth_mbps <= 0:
+            return 0.0
+        # thời gian = (bytes * 8 bits/byte) / (Mbps * 1e6)
+        return (data_len_bytes * 8.0) / (bandwidth_mbps * 1e6)
+
+    def _run_workflow(self, scheduler, input_data: bytes, request_id: str, injected_latency_ms: float = 0.0):
         """Run a complete workflow using the orchestrator.
         Returns (function_results: List[FunctionExecutionResult], request_metrics: Dict)
         """
         start_time = time.time()
+
+        # Inject artificial network latency if configured
+        if injected_latency_ms and injected_latency_ms > 0:
+            time.sleep(injected_latency_ms / 1000.0)
         
         try:
             # Use the orchestrator's run_workflow method
@@ -604,7 +680,7 @@ class ExperimentRunner:
         input_data = self.load_input_data(config)
         
         # Get scheduler
-        scheduler = self.get_scheduler(config.scheduler_type)
+        scheduler = self.get_scheduler(config)
         
         # Extract function names
         function_names = self.extract_function_names()
@@ -622,12 +698,24 @@ class ExperimentRunner:
         
         def run_with_concurrency_control(request_id, i):
             """Run a single request with concurrency control and queuing timing"""
+            import time
+            import random
+
             submission_time = time.time()  # Record when request is submitted
             
             with concurrency_semaphore:  # This ensures only concurrency_level requests run simultaneously
-                if config.scheduler_type in ["ours", "FaasPRS", "ditto", "palette"]:
+                if config.scheduler_type in ["ours", "FaasPRS", "palette"]: #, "ditto"]:
+                    if (
+                        config.bandwidth_cap_mbps is not None
+                        and config.expected_bottleneck and "network" in config.expected_bottleneck.lower()
+                    ):
+                        # Simulate network transfer delay before workflow execution
+                        transfer_delay = self.compute_transfer_delay_sec(len(input_data), config.bandwidth_cap_mbps)
+                        if transfer_delay > 0:
+                            time.sleep(transfer_delay)
+
                     # Use workflow execution for workflow-aware schedulers
-                    result = self._run_workflow(scheduler, input_data, request_id)
+                    result = self._run_workflow(scheduler, input_data, request_id, injected_latency_ms=config.injected_latency_ms or 0.0)
                     
                     # Calculate queuing delay (time between submission and execution start)
                     if isinstance(result, tuple):
@@ -641,7 +729,7 @@ class ExperimentRunner:
                             workflow_start = timeline['workflow'].get('start')
                             if workflow_start:
                                 queuing_delay = (workflow_start - submission_time) * 1000.0
-                                req_metrics['queuing_delay_ms'] = queuing_delay
+                                req_metrics['queuing_delay_ms'] = max(0.0, queuing_delay)
                         return result
                     else:
                         return result
@@ -661,13 +749,36 @@ class ExperimentRunner:
             function_results, per_request_metrics = burst_results
         else:
             # Original behavior for non-burst scenarios
-            with concurrent.futures.ThreadPoolExecutor(max_workers=config.total_requests) as executor:
+            experiment_start = time.time()
+            max_workers = min(config.total_requests, config.concurrency_level * 2)
+            with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
                 # Submit all workflow executions
                 future_to_request = {}
+                interval = None
+
+                if config.request_rate_per_sec and config.request_rate_per_sec > 0:
+                    interval = 1.0 / float(config.request_rate_per_sec)
+
                 for i in range(config.total_requests):
+                    
+                    # Kiểm tra timeout theo duration_sec
+                    if config.duration_sec is not None:
+                        elapsed = time.time() - experiment_start
+                        if elapsed >= config.duration_sec:
+                            print(
+                                f"⏰ Duration limit reached ({config.duration_sec}s), "
+                                f"stopping after {i} requests"
+                            )
+                            break
+
                     request_id = f"{config.experiment_id}_workflow_{i}"
                     future = executor.submit(run_with_concurrency_control, request_id, i)
                     future_to_request[future] = (request_id, i)
+
+                    if interval is not None and i < config.total_requests - 1:
+                        # time.sleep(interval)
+                        sleep_time = random.expovariate(config.request_rate_per_sec)
+                        time.sleep(sleep_time)
                 
                 # Collect results
                 for future in concurrent.futures.as_completed(future_to_request):
@@ -691,22 +802,30 @@ class ExperimentRunner:
                                 success=False,
                                 execution_time_ms=0,
                                 error_message=str(e)
-                            ))
-        
+                            )) 
+
         total_execution_time = (time.time() - start_time) * 1000
         
         # Calculate metrics
         successful_results = [r for r in function_results if r.success]
-        success_rate = len(successful_results) / len(function_results) if function_results else 0
+        success_rate = len(successful_results) / len(function_results) if function_results else 0.0
         
         execution_times = [r.execution_time_ms for r in successful_results]
-        avg_execution_time = statistics.mean(execution_times) if execution_times else 0
+        avg_execution_time = statistics.mean(execution_times) if execution_times else 0.0
         
-        # Throughput: total function calls over experiment wall time (seconds)
-        if total_execution_time > 0 and success_rate==100:
-            throughput = len(function_results) / (total_execution_time / 1000) 
+        # # Throughput: total function calls over experiment wall time (seconds)
+        # if total_execution_time > 0 and success_rate==100:
+        #     throughput = len(function_results) / (total_execution_time / 1000) 
+        # else:
+        #     throughput = 0
+
+        n_functions = len(function_names) if function_names else 1
+        # completed_workflow_requests = len(successful_results) / n_functions if n_functions > 0 else 0
+        completed_workflow_requests = len([m for m in per_request_metrics.values() if m.get('end_to_end_latency_ms', 0) > 0])  # Count requests with valid execution time as completed
+        if total_execution_time > 0:
+            throughput = completed_workflow_requests / (total_execution_time / 1000.0)
         else:
-            throughput = 0
+            throughput = 0.0
         
         # Get scheduler metrics and attach timing aggregates
         scheduler_metrics = scheduler.get_metrics()
@@ -729,6 +848,8 @@ class ExperimentRunner:
                     [x for v in req_vals for x in v.get('network_delay_ms', [])] or [0]
                 ),
                 'processing_delay_avg_ms': statistics.mean(v.get('processing_delay_ms', 0) for v in req_vals),
+                # queuing_delay_avg_ms: average time from request submission to workflow execution start (ms)
+                # This measures scheduler queue wait time, NOT cumulative function-level queuing
                 'queuing_delay_avg_ms': statistics.mean(v.get('queuing_delay_ms', 0) for v in req_vals),
             }
             # Prefer timeline-derived function execution average if available
@@ -737,6 +858,41 @@ class ExperimentRunner:
                     avg_execution_time = scheduler_metrics['timing']['function_exec_avg_ms']
             except Exception as e:
                 print(f"DEBUG: Error getting function exec avg ms: {e}")
+        
+        # Outlier detection
+        outliers = [
+            (req_id, m["end_to_end_latency_ms"])
+            for req_id, m in per_request_metrics.items()
+            if m.get("end_to_end_latency_ms", 0) > LATENCY_OUTLIER_THRESHOLD_MS
+        ]
+
+        if req_vals and outliers:
+            scheduler_metrics.setdefault("timing", {})
+            scheduler_metrics['timing']['outlier_count'] = len(outliers)
+            scheduler_metrics['timing']['outlier_pct'] = len(outliers) / len(per_request_metrics) * 100.0
+            scheduler_metrics['timing']['outlier_threshold_ms'] = LATENCY_OUTLIER_THRESHOLD_MS
+            scheduler_metrics['timing']['outlier_requests'] = [
+                {"request_id": r, "e2e_ms": round(e, 1)} for r, e in outliers
+            ]
+
+        # Bottleneck comparison
+        if req_vals:
+            flat_timing = {
+                "function_exec_avg_ms":       scheduler_metrics.get("timing", {}).get("function_exec_avg_ms", 0),
+                "network_delay_avg_ms":       scheduler_metrics.get("timing", {}).get("network_delay_avg_ms", 0),
+                "queuing_delay_avg_ms":       scheduler_metrics.get("timing", {}).get("queuing_delay_avg_ms", 0),
+                "scheduling_overhead_avg_ms": scheduler_metrics.get("timing", {}).get("scheduling_overhead_avg_ms", 0),
+            }
+            observed = infer_bottleneck_from_metrics(flat_timing)
+            expected = config.expected_bottleneck or "N/A"
+            match_icon = "✅" if expected.lower().split()[0] in observed.lower() else "⚠️ "
+            print(f"   {match_icon} Bottleneck → expected: {expected}, observed: {observed}")
+            # Ghi vào metrics để lưu JSON
+            scheduler_metrics["timing"]["observed_bottleneck"] = observed
+            scheduler_metrics["timing"]["expected_bottleneck"] = expected
+        else: 
+            observed = "Unknown"
+            expected = config.expected_bottleneck or "N/A"
         
         result = ExperimentResult(
             config=config,
@@ -750,6 +906,16 @@ class ExperimentRunner:
         )
         
         print(f"   ✅ Success: {success_rate*100:.1f}%, Avg time: {avg_execution_time:.3f}ms, Throughput: {throughput:.1f} req/s")
+        
+        if outliers:
+            print(f"⚠️  {len(outliers)} latency outlier(s) detected (>{LATENCY_OUTLIER_THRESHOLD_MS}ms):")
+            for req_id, e2e in sorted(outliers, key=lambda x: x[1], reverse=True):
+                print(f"   - {req_id}: {e2e:.0f} ms")
+            outlier_pct = len(outliers) / len(per_request_metrics) * 100
+            print(f"   → {outlier_pct:.1f}% of requests are outliers")
+            if outlier_pct > 10:
+                print(f"   ⛔ WARNING: >10% outliers — replicate may be unreliable for publication")  
+
         # Print detailed timing metrics if available
         timing = scheduler_metrics.get('timing') if isinstance(scheduler_metrics, dict) else None
         init_overhead = scheduler_metrics.get('init_overhead') if isinstance(scheduler_metrics, dict) else None
@@ -1131,7 +1297,7 @@ class ExperimentRunner:
                 # Extract timeline data for this scheduler directly from the orchestrator if available
                 timeline_data = None
                 try:
-                    scheduler = self.get_scheduler(result.config.scheduler_type)
+                    scheduler = self.get_scheduler(result.config)
                     timeline_data = self.extract_scheduler_timelines(scheduler, result.config.scheduler_type)
                 except Exception:
                     pass
@@ -1325,43 +1491,43 @@ class ExperimentRunner:
                             timeline_data["bucket_statistics_error"] = str(e)
                 
                 # For Ditto scheduler, extract additional data
-                if scheduler_type == "ditto":
-                    # Extract predictor data (contains TimeModel objects)
-                    if hasattr(orchestrator, 'predictor'):
-                        predictor = orchestrator.predictor
-                        timeline_data["predictor_info"] = {
-                            "type": type(predictor).__name__,
-                            "stage_models": {}
-                        }
-                        # Convert TimeModel objects to serializable format
-                        if hasattr(predictor, '_stage_models'):
-                            for stage_id, time_model in predictor._stage_models.items():
-                                timeline_data["predictor_info"]["stage_models"][stage_id] = {
-                                    "type": "TimeModel",
-                                    "observed_times_ms": getattr(time_model, 'observed_times_ms', {})
-                                }
+                # if scheduler_type == "ditto":
+                #     # Extract predictor data (contains TimeModel objects)
+                #     if hasattr(orchestrator, 'predictor'):
+                #         predictor = orchestrator.predictor
+                #         timeline_data["predictor_info"] = {
+                #             "type": type(predictor).__name__,
+                #             "stage_models": {}
+                #         }
+                #         # Convert TimeModel objects to serializable format
+                #         if hasattr(predictor, '_stage_models'):
+                #             for stage_id, time_model in predictor._stage_models.items():
+                #                 timeline_data["predictor_info"]["stage_models"][stage_id] = {
+                #                     "type": "TimeModel",
+                #                     "observed_times_ms": getattr(time_model, 'observed_times_ms', {})
+                #                 }
                     
-                    # Extract other Ditto components
-                    if hasattr(orchestrator, 'grouper'):
-                        timeline_data["grouper_info"] = {
-                            "type": type(orchestrator.grouper).__name__,
-                            "shuffle_threshold_bytes": getattr(orchestrator.grouper, 'shuffle_threshold_bytes', None)
-                        }
+                #     # Extract other Ditto components
+                #     if hasattr(orchestrator, 'grouper'):
+                #         timeline_data["grouper_info"] = {
+                #             "type": type(orchestrator.grouper).__name__,
+                #             "shuffle_threshold_bytes": getattr(orchestrator.grouper, 'shuffle_threshold_bytes', None)
+                #         }
                     
-                    if hasattr(orchestrator, 'dop_computer'):
-                        timeline_data["dop_computer_info"] = {
-                            "type": type(orchestrator.dop_computer).__name__
-                        }
+                #     if hasattr(orchestrator, 'dop_computer'):
+                #         timeline_data["dop_computer_info"] = {
+                #             "type": type(orchestrator.dop_computer).__name__
+                #         }
                     
-                    if hasattr(orchestrator, 'placement'):
-                        timeline_data["placement_info"] = {
-                            "type": type(orchestrator.placement).__name__
-                        }
+                #     if hasattr(orchestrator, 'placement'):
+                #         timeline_data["placement_info"] = {
+                #             "type": type(orchestrator.placement).__name__
+                #         }
                     
-                    if hasattr(orchestrator, 'plan_evaluator'):
-                        timeline_data["plan_evaluator_info"] = {
-                            "type": type(orchestrator.plan_evaluator).__name__
-                        }
+                #     if hasattr(orchestrator, 'plan_evaluator'):
+                #         timeline_data["plan_evaluator_info"] = {
+                #             "type": type(orchestrator.plan_evaluator).__name__
+                #         }
                 
         except Exception as e:
             timeline_data["extraction_error"] = str(e)
@@ -1620,182 +1786,319 @@ def run_scale_testing():
     
     return configs
 
-def create_test_image(size_bytes: int, filename: str):
-    """Create a proper PNG test image of specified size that can be loaded and resized"""
-    if not os.path.exists(filename):
-        try:
-            base_image_path = 'data/test.png'
+# def create_test_image(size_bytes: int, filename: str):
+#     """Create a proper PNG test image of specified size that can be loaded and resized"""
+#     if not os.path.exists(filename):
+#         try:
+#             base_image_path = 'data/test.png'
             
-            # Decide strategy based on target size
-            if os.path.exists(base_image_path):
-                base_size = os.path.getsize(base_image_path)
+#             # Decide strategy based on target size
+#             if os.path.exists(base_image_path):
+#                 base_size = os.path.getsize(base_image_path)
                 
-                if size_bytes < base_size * 0.5:
-                    # For images smaller than half the base size, resize/downsample
-                    _create_downsampled_test_image(base_image_path, filename, size_bytes)
-                else:
-                    # For images larger than base, tile it
-                    _create_tiled_test_image(base_image_path, filename, size_bytes)
-            else:
-                # Create from scratch if base image doesn't exist
-                _create_gradient_test_image(filename, size_bytes)
+#                 if size_bytes < base_size * 0.5:
+#                     # For images smaller than half the base size, resize/downsample
+#                     _create_downsampled_test_image(base_image_path, filename, size_bytes)
+#                 else:
+#                     # For images larger than base, tile it
+#                     _create_tiled_test_image(base_image_path, filename, size_bytes)
+#             else:
+#                 # Create from scratch if base image doesn't exist
+#                 _create_gradient_test_image(filename, size_bytes)
     
-        except Exception as e:
-            print(f"⚠️  Error creating test image {filename}: {e}")
-            # Last resort: create a simple gradient image
-            _create_gradient_test_image(filename, size_bytes)
+#         except Exception as e:
+#             print(f"⚠️  Error creating test image {filename}: {e}")
+#             # Last resort: create a simple gradient image
+#             _create_gradient_test_image(filename, size_bytes)
 
-def _create_downsampled_test_image(base_image_path: str, output_path: str, target_size_bytes: int):
-    """Create a smaller test image by downsampling the base image"""
+# def create_test_image(size_bytes: int, filename: str):
+#     """Tạo ảnh với kích thước pixel hợp lý, padding bằng noise để đạt size_bytes."""
+#     import os
+#     from PIL import Image
+#     import numpy as np
+
+#     if os.path.exists(filename):
+#         return
+
+#     # Giới hạn an toàn: ≤ ~100M pixels (Pillow default limit ~178M)
+#     # Chọn grid bậc thang theo size_bytes
+#     if size_bytes <= 200 * 1024:        # ≤ 200KB: 256×256
+#         w = h = 256
+#     elif size_bytes <= 2 * 1024**2:     # ≤ 2MB: 512×512
+#         w = h = 512
+#     elif size_bytes <= 10 * 1024**2:    # ≤ 10MB: 1024×1024
+#         w = h = 1024
+#     else:                               # ≤ 20MB (hoặc hơn một chút): 2048×2048
+#         w = h = 2048
+
+#     # Noise ngẫu nhiên để tránh bị nén quá tốt
+#     arr = np.random.randint(0, 256, (h, w, 3), dtype=np.uint8)
+#     img = Image.fromarray(arr, 'RGB')
+
+#     # Lưu PNG không optimize để giữ kích thước lớn, noise giúp size gần target
+#     os.makedirs(os.path.dirname(filename) or ".", exist_ok=True)
+#     img.save(filename, format='PNG', optimize=False)
+
+#     actual_size = os.path.getsize(filename)
+#     size_kb = actual_size / 1024
+#     size_mb = actual_size / (1024 * 1024)
+#     if size_mb >= 1:
+#         print(f"✅ Created test image: {filename} ({size_mb:.2f} MB, {w}x{h})")
+#     else:
+#         print(f"✅ Created test image: {filename} ({size_kb:.1f} KB, {w}x{h})")
+
+def _pick_side_for_target(size_bytes: int) -> int:
+    kb = size_bytes / 1024
+    mb = size_bytes / (1024 * 1024)
+
+    # Các ngưỡng nhỏ: chọn side cố định để tách nhau rõ ràng
+    if kb <= 20:        # ~10KB
+        return 64
+    if kb <= 150:       # ~100KB
+        return 256
+    if kb <= 300:       # ~200KB
+        return 360
+    if kb <= 700:       # ~500KB
+        return 512
+
+    # Ngưỡng MB: tăng dần
+    if mb <= 1.5:       # ~1MB
+        return 768
+    if mb <= 2.5:       # ~2MB
+        return 1024
+    if mb <= 6:         # ~5MB
+        return 1536
+    if mb <= 12:        # ~10MB
+        return 2048
+    if mb <= 25:        # ~20MB
+        return 2560
+    if mb <= 60:        # ~50MB
+        return 3200
+
+    # fallback an toàn
+    return 4096
+
+def create_test_image(size_bytes: int, filename: str, tolerance_ratio: float = 0.05):
+    """Create a PNG test image whose on-disk size is close to size_bytes.
+
+    Strategy:
+    1. Create a noisy RGB PNG with enough entropy to avoid over-compression.
+    2. If the saved PNG is smaller than target, pad trailing bytes to hit target.
+    3. If an existing file is already close enough, keep it.
+    """
     import math
-    
-    # Load base image
-    base_img = Image.open(base_image_path)
-    base_width, base_height = base_img.size
-    base_size_bytes = os.path.getsize(base_image_path)
-    
-    # Estimate the scale factor needed
-    # PNG compression is variable, so we estimate
-    size_ratio = target_size_bytes / base_size_bytes
-    scale_factor = math.sqrt(size_ratio)  # Scale both dimensions
-    
-    # Calculate new dimensions (minimum 224x224 for model compatibility)
-    new_width = max(224, int(base_width * scale_factor))
-    new_height = max(224, int(base_height * scale_factor))
-    
-    # Resize the image
-    resized_img = base_img.resize((new_width, new_height), Image.Resampling.LANCZOS)
-    
-    # Save with different compression levels to try to hit target size
-    # Start with high quality and reduce if needed
-    for quality in [95, 85, 75, 65]:
-        resized_img.save(output_path, 'PNG', optimize=True)
-        actual_size = os.path.getsize(output_path)
-        
-        # If we're close enough to target (within 50%), accept it
-        if actual_size <= target_size_bytes * 1.5:
-            break
-        
-        # If still too large, try reducing dimensions further
-        if actual_size > target_size_bytes * 2:
-            new_width = int(new_width * 0.8)
-            new_height = int(new_height * 0.8)
-            new_width = max(224, new_width)
-            new_height = max(224, new_height)
-            resized_img = base_img.resize((new_width, new_height), Image.Resampling.LANCZOS)
-    
-    actual_size = os.path.getsize(output_path)
+    import os
+    from PIL import Image
+    import numpy as np
+
+    os.makedirs(os.path.dirname(filename) or ".", exist_ok=True)
+
+    if os.path.exists(filename):
+        actual_size = os.path.getsize(filename)
+        if abs(actual_size - size_bytes) <= max(4096, int(size_bytes * tolerance_ratio)):
+            size_mb = actual_size / (1024 * 1024)
+            size_kb = actual_size / 1024
+            if size_mb >= 1:
+                print(f"✅ Reusing test image: {filename} ({size_mb:.2f} MB)")
+            else:
+                print(f"✅ Reusing test image: {filename} ({size_kb:.1f} KB)")
+            return
+        else:
+            print(f"♻️ Recreating {filename}: existing size {actual_size} bytes != target {size_bytes} bytes")
+            try:
+                os.remove(filename)
+            except OSError:
+                pass
+
+    # 1) Chọn side theo bucket
+    side = _pick_side_for_target(size_bytes)
+
+    # 2) Tạo noise image
+    arr = np.random.randint(0, 256, (side, side, 3), dtype=np.uint8)
+    img = Image.fromarray(arr, "RGB")
+    img.save(filename, format="PNG", optimize=False, compress_level=0)
+
+    actual_size = os.path.getsize(filename)
+
+    # If too small, pad trailing bytes.
+    # PNG readers usually ignore trailing bytes after IEND, so file remains readable.
+    if actual_size < size_bytes:
+        pad_len = size_bytes - actual_size
+        with open(filename, "ab") as f:
+            f.write(b"\0" * pad_len)
+        actual_size = os.path.getsize(filename)
+
+    # If too large, regenerate with a smaller side length once.
+    elif actual_size > size_bytes * (1 + tolerance_ratio):
+        smaller_side = max(32, int(side * 0.7))
+        arr = np.random.randint(0, 256, (smaller_side, smaller_side, 3), dtype=np.uint8)
+        img = Image.fromarray(arr, "RGB")
+        img.save(filename, format="PNG", optimize=False, compress_level=0)
+        actual_size = os.path.getsize(filename)
+
+        if actual_size < size_bytes:
+            pad_len = size_bytes - actual_size
+            with open(filename, "ab") as f:
+                f.write(b"\0" * pad_len)
+            actual_size = os.path.getsize(filename)
+
     size_kb = actual_size / 1024
     size_mb = actual_size / (1024 * 1024)
-    
     if size_mb >= 1:
-        print(f"✅ Created downsampled test image: {output_path} ({size_mb:.2f} MB, {new_width}x{new_height})")
+        print(f"✅ Created test image: {filename} ({size_mb:.2f} MB, target={(size_bytes / (1024 * 1024)):.2f} MB)")
     else:
-        print(f"✅ Created downsampled test image: {output_path} ({size_kb:.1f} KB, {new_width}x{new_height})")
+        print(f"✅ Created test image: {filename} ({size_kb:.1f} KB, target={(size_bytes / 1024):.1f} KB)")
 
-def _create_gradient_test_image(filename: str, target_size_bytes: int):
-    """Create a gradient test image from scratch"""
-    # Estimate dimensions based on target size
-    # PNG compression varies, so we estimate conservatively
-    import math
-    estimated_pixels = target_size_bytes * 2  # Conservative estimate
-    side_length = int(math.sqrt(estimated_pixels / 3))  # 3 bytes per RGB pixel
-    side_length = max(224, side_length)  # At least 224x224 for model compatibility
+# def _create_downsampled_test_image(base_image_path: str, output_path: str, target_size_bytes: int):
+#     """Create a smaller test image by downsampling the base image"""
+#     import math
     
-    # Create gradient image
-    image = Image.new('RGB', (side_length, side_length), color='white')
-    pixels = image.load()
+#     # Load base image
+#     base_img = Image.open(base_image_path)
+#     base_width, base_height = base_img.size
+#     base_size_bytes = os.path.getsize(base_image_path)
     
-    for i in range(side_length):
-        for j in range(side_length):
-            r = (i * 255) // side_length
-            g = (j * 255) // side_length
-            b = ((i + j) * 255) // (side_length + side_length)
-            pixels[i, j] = (r, g, b)
+#     # Estimate the scale factor needed
+#     # PNG compression is variable, so we estimate
+#     size_ratio = target_size_bytes / base_size_bytes
+#     scale_factor = math.sqrt(size_ratio)  # Scale both dimensions
     
-    image.save(filename, 'PNG', optimize=True)
-    actual_size = os.path.getsize(filename)
-    size_mb = actual_size / (1024 * 1024)
-    print(f"✅ Created gradient test image: {filename} ({size_mb:.2f} MB, {side_length}x{side_length})")
+#     # Calculate new dimensions (minimum 224x224 for model compatibility)
+#     new_width = max(224, int(base_width * scale_factor))
+#     new_height = max(224, int(base_height * scale_factor))
+    
+#     # Resize the image
+#     resized_img = base_img.resize((new_width, new_height), Image.Resampling.LANCZOS)
+    
+#     # Save with different compression levels to try to hit target size
+#     # Start with high quality and reduce if needed
+#     for quality in [95, 85, 75, 65]:
+#         resized_img.save(output_path, 'PNG', optimize=True)
+#         actual_size = os.path.getsize(output_path)
+        
+#         # If we're close enough to target (within 50%), accept it
+#         if actual_size <= target_size_bytes * 1.5:
+#             break
+        
+#         # If still too large, try reducing dimensions further
+#         if actual_size > target_size_bytes * 2:
+#             new_width = int(new_width * 0.8)
+#             new_height = int(new_height * 0.8)
+#             new_width = max(224, new_width)
+#             new_height = max(224, new_height)
+#             resized_img = base_img.resize((new_width, new_height), Image.Resampling.LANCZOS)
+    
+#     actual_size = os.path.getsize(output_path)
+#     size_kb = actual_size / 1024
+#     size_mb = actual_size / (1024 * 1024)
+    
+#     if size_mb >= 1:
+#         print(f"✅ Created downsampled test image: {output_path} ({size_mb:.2f} MB, {new_width}x{new_height})")
+#     else:
+#         print(f"✅ Created downsampled test image: {output_path} ({size_kb:.1f} KB, {new_width}x{new_height})")
 
-def _create_tiled_test_image(base_image_path: str, output_path: str, target_size_bytes: int):
-    """Create a larger test image by tiling the base image"""
-    import math
+# def _create_gradient_test_image(filename: str, target_size_bytes: int):
+#     """Create a gradient test image from scratch"""
+#     # Estimate dimensions based on target size
+#     # PNG compression varies, so we estimate conservatively
+#     import math
+#     estimated_pixels = target_size_bytes * 2  # Conservative estimate
+#     side_length = int(math.sqrt(estimated_pixels / 3))  # 3 bytes per RGB pixel
+#     side_length = max(224, side_length)  # At least 224x224 for model compatibility
     
-    # Load base image
-    base_img = Image.open(base_image_path)
-    base_width, base_height = base_img.size
-    base_size_bytes = os.path.getsize(base_image_path)
+#     # Create gradient image
+#     image = Image.new('RGB', (side_length, side_length), color='white')
+#     pixels = image.load()
     
-    # Use binary search to find the right number of tiles
-    # Start with a rough estimate based on linear scaling
-    min_copies = max(1, int((target_size_bytes * 0.5) / base_size_bytes))
-    max_copies = max(1, int((target_size_bytes * 3) / base_size_bytes))
+#     for i in range(side_length):
+#         for j in range(side_length):
+#             r = (i * 255) // side_length
+#             g = (j * 255) // side_length
+#             b = ((i + j) * 255) // (side_length + side_length)
+#             pixels[i, j] = (r, g, b)
     
-    best_output_path = None
-    best_size_diff = float('inf')
+#     image.save(filename, 'PNG', optimize=True)
+#     actual_size = os.path.getsize(filename)
+#     size_mb = actual_size / (1024 * 1024)
+#     print(f"✅ Created gradient test image: {filename} ({size_mb:.2f} MB, {side_length}x{side_length})")
+
+# def _create_tiled_test_image(base_image_path: str, output_path: str, target_size_bytes: int):
+#     """Create a larger test image by tiling the base image"""
+#     import math
     
-    # Try a few different tile counts to get close to target
-    for estimated_copies in [min_copies, (min_copies + max_copies) // 2, max_copies]:
-        # Calculate grid dimensions for roughly square layout
-        grid_size = int(math.ceil(math.sqrt(estimated_copies)))
-        
-        # Create output image
-        padding = 20  # Small padding between tiles
-        output_width = grid_size * base_width + (grid_size - 1) * padding
-        output_height = grid_size * base_height + (grid_size - 1) * padding
-        
-        output_img = Image.new('RGB', (output_width, output_height), 'white')
-        
-        # Tile the base image
-        for i in range(estimated_copies):
-            row = i // grid_size
-            col = i % grid_size
-            x = col * (base_width + padding)
-            y = row * (base_height + padding)
-            if x < output_width and y < output_height:
-                output_img.paste(base_img, (x, y))
-        
-        # Save with optimization
-        temp_path = output_path + f".temp{estimated_copies}"
-        output_img.save(temp_path, 'PNG', optimize=True)
-        
-        actual_size = os.path.getsize(temp_path)
-        size_diff = abs(actual_size - target_size_bytes)
-        
-        # Keep the version closest to target
-        if size_diff < best_size_diff:
-            best_size_diff = size_diff
-            if best_output_path and os.path.exists(best_output_path):
-                os.remove(best_output_path)
-            best_output_path = temp_path
-        else:
-            os.remove(temp_path)
-        
-        # If we're within 20% of target, that's good enough
-        if actual_size >= target_size_bytes * 0.8 and actual_size <= target_size_bytes * 1.2:
-            break
+#     # Load base image
+#     base_img = Image.open(base_image_path)
+#     base_width, base_height = base_img.size
+#     base_size_bytes = os.path.getsize(base_image_path)
     
-    # Rename the best version to final output
-    if best_output_path:
-        if os.path.exists(output_path):
-            os.remove(output_path)
-        os.rename(best_output_path, output_path)
+#     # Use binary search to find the right number of tiles
+#     # Start with a rough estimate based on linear scaling
+#     min_copies = max(1, int((target_size_bytes * 0.5) / base_size_bytes))
+#     max_copies = max(1, int((target_size_bytes * 3) / base_size_bytes))
     
-    actual_size = os.path.getsize(output_path)
-    size_mb = actual_size / (1024 * 1024)
-    print(f"✅ Created tiled test image: {output_path} ({size_mb:.2f} MB, {output_width}x{output_height})")
+#     best_output_path = None
+#     best_size_diff = float('inf')
+    
+#     # Try a few different tile counts to get close to target
+#     for estimated_copies in [min_copies, (min_copies + max_copies) // 2, max_copies]:
+#         # Calculate grid dimensions for roughly square layout
+#         grid_size = int(math.ceil(math.sqrt(estimated_copies)))
+        
+#         # Create output image
+#         padding = 20  # Small padding between tiles
+#         output_width = grid_size * base_width + (grid_size - 1) * padding
+#         output_height = grid_size * base_height + (grid_size - 1) * padding
+        
+#         output_img = Image.new('RGB', (output_width, output_height), 'white')
+        
+#         # Tile the base image
+#         for i in range(estimated_copies):
+#             row = i // grid_size
+#             col = i % grid_size
+#             x = col * (base_width + padding)
+#             y = row * (base_height + padding)
+#             if x < output_width and y < output_height:
+#                 output_img.paste(base_img, (x, y))
+        
+#         # Save with optimization
+#         temp_path = output_path + f".temp{estimated_copies}"
+#         output_img.save(temp_path, 'PNG', optimize=True)
+        
+#         actual_size = os.path.getsize(temp_path)
+#         size_diff = abs(actual_size - target_size_bytes)
+        
+#         # Keep the version closest to target
+#         if size_diff < best_size_diff:
+#             best_size_diff = size_diff
+#             if best_output_path and os.path.exists(best_output_path):
+#                 os.remove(best_output_path)
+#             best_output_path = temp_path
+#         else:
+#             os.remove(temp_path)
+        
+#         # If we're within 20% of target, that's good enough
+#         if actual_size >= target_size_bytes * 0.8 and actual_size <= target_size_bytes * 1.2:
+#             break
+    
+#     # Rename the best version to final output
+#     if best_output_path:
+#         if os.path.exists(output_path):
+#             os.remove(output_path)
+#         os.rename(best_output_path, output_path)
+    
+#     actual_size = os.path.getsize(output_path)
+#     size_mb = actual_size / (1024 * 1024)
+#     print(f"✅ Created tiled test image: {output_path} ({size_mb:.2f} MB, {output_width}x{output_height})")
 
 def create_large_test_images():
     """Create large test images for scale testing"""
     
     print("🖼️  Creating proper PNG test images for scale testing...")
     
-    # Create 5MB test image
     create_test_image(5 * 1024 * 1024, "data/test_5mb.png")
-    
-    # Create 10MB test image
     create_test_image(10 * 1024 * 1024, "data/test_10mb.png")
+    create_test_image(20 * 1024 * 1024, "data/test_20mb.png")
+    create_test_image(50 * 1024 * 1024, "data/test_50mb.png")
     
     print("✅ Scale test images created successfully")
 
@@ -1810,6 +2113,7 @@ def create_scenario_test_images():
     create_test_image(200 * 1024, "data/test_200kb.png")          # 200KB for Small-Msgs
     create_test_image(500 * 1024, "data/test_500kb.png")         # 500KB for Small-Msgs
     create_test_image(1 * 1024 * 1024, "data/test_1mb.png")    # 1MB for Small-Msgs, Vary-Input
+    create_test_image(2 * 1024 * 1024, "data/test_2mb.png")
     create_test_image(5 * 1024 * 1024, "data/test_5mb.png")    # 5MB for baseline scenarios, Vary-Input
     create_test_image(10 * 1024 * 1024, "data/test_10mb.png")  # 10MB for Vary-Input
     create_test_image(20 * 1024 * 1024, "data/test_20mb.png")  # 20MB for Burst-Spike, Vary-Input
@@ -1868,7 +2172,7 @@ def create_smoke_test_configs(
 
 
 def create_scenario_configs(
-    schedulers: List[str] = ["ours", "FaasPRS", "ditto", "palette"],
+    schedulers: List[str] = ["ours", "FaasPRS", "palette"], #"ditto"],
     scenario_names: List[str] | None = None,
 ) -> List[ExperimentConfig]:
     """Create experiment configurations for the 5 specific scenarios"""
@@ -1876,81 +2180,163 @@ def create_scenario_configs(
     
     # Scenario definitions - each varies only ONE variable while others are fixed
     # Fixed baseline values: input_size=5MB, concurrency=1, request_rate=1 req/s, duration=120s
+    # scenarios = [
+    #     {
+    #         "name": "Baseline-CleanNet",
+    #         "input_size_mb": 5,  # Fixed baseline
+    #         "concurrency": 1,      # Fixed baseline
+    #         "request_rate_per_sec": 1,  # Fixed baseline
+    #         "bandwidth_cap_mbps": 1000,  # No cap (very high)
+    #         "injected_latency_ms": 1,
+    #         "duration_sec": 5,  # Fixed baseline
+    #         "replicates": 10,
+    #         "refinement_time_cap_sec": 0.02,
+    #         "expected_bottleneck": "None (balanced)"
+    #     },
+    #     # Temporarily disabled due to BytesIO issues
+    #     {
+    #         "name": "Vary-Input",
+    #         "input_size_mb": [5, 10, 15, 20],  # VARIES: 5MB to 50MB
+    #         "concurrency": 1,      # Fixed baseline
+    #         "request_rate_per_sec": 1,  # Fixed baseline
+    #         "bandwidth_cap_mbps": 1000,  # No cap
+    #         "injected_latency_ms": 1,
+    #         "duration_sec": 10,  # Fixed baseline
+    #         "replicates": 10,
+    #         "refinement_time_cap_sec": 0.02,
+    #         "expected_bottleneck": "Network (bandwidth/transfer)"
+    #     },
+    #     {
+    #         "name": "Vary-Concurrency",
+    #         "input_size_mb": 5,  # Fixed baseline
+    #         "concurrency": [1, 5, 10, 20], #, 50],  # VARIES: 1, 20, 100
+    #         "request_rate_per_sec": 1,  # Fixed baseline
+    #         "bandwidth_cap_mbps": 1000,  # No cap
+    #         "injected_latency_ms": 1,
+    #         "duration_sec": 10,  # Extended for higher concurrency
+    #         "replicates": 10,
+    #         "refinement_time_cap_sec": 0.02,
+    #         "expected_bottleneck": "Compute / contention (queues)"
+    #     },
+    #     {
+    #         "name": "Vary-FiringRate",
+    #         "input_size_mb": 5,  # Fixed baseline
+    #         "concurrency": 5,      # Fixed moderate level
+    #         "request_rate_per_sec": [5, 10, ], #20], # 30], # 100, 200],  # VARIES: 1, 50, 200 req/s
+    #         "bandwidth_cap_mbps": 1000,  # No cap
+    #         "injected_latency_ms": 1,
+    #         "duration_sec": 5,  # Extended for higher rates
+    #         "replicates": 10,
+    #         "refinement_time_cap_sec": 0.02,
+    #         "expected_bottleneck": "Queueing / compute contention"
+    #     },
+    #     {
+    #         "name": "Small-Msgs",
+    #         "input_size_mb": [0.01, 0.05, 0.1, 0.5, 1],  # VARIES: 10KB, 100KB, 1MB
+    #         "concurrency": 50,     # Fixed high level
+    #         "request_rate_per_sec": 100,  # Fixed high rate
+    #         "bandwidth_cap_mbps": 1000,  # No cap
+    #         "injected_latency_ms": 1,
+    #         "duration_sec": 10,  # Fixed duration
+    #         "replicates": 10,
+    #         "refinement_time_cap_sec": 0.02,
+    #         "expected_bottleneck": "Network (latency)"
+    #     },
+    #     {
+    #         "name": "Burst-Spike",
+    #         "input_size_mb": 2,  # Moderate size for better testing
+    #         "concurrency": [5, 10, 20],  # VARIES: baseline 5 → spike 20
+    #         "request_rate_per_sec": [2, 20],  # VARIES: baseline 2 → spike 50 req/s
+    #         "bandwidth_cap_mbps": 1000,  # No cap
+    #         "injected_latency_ms": 1,
+    #         "duration_sec": 15,  # Fixed duration
+    #         "replicates": 10,
+    #         "refinement_time_cap_sec": 0.02,
+    #         "expected_bottleneck": "Queueing / transient network"
+    #     }
+    # ]
+
     scenarios = [
         {
             "name": "Baseline-CleanNet",
-            "input_size_mb": 5,  # Fixed baseline
-            "concurrency": 1,      # Fixed baseline
-            "request_rate_per_sec": 1,  # Fixed baseline
-            "bandwidth_cap_mbps": 1000,  # No cap (very high)
-            "injected_latency_ms": 1,
-            "duration_sec": 5,  # Fixed baseline
-            "replicates": 1,
-            "refinement_time_cap_sec": 0.02,
-            "expected_bottleneck": "None (balanced)"
+            "input_size_mb": 5,          # ảnh 5MB hợp lệ (pixel ≤ 178M)
+            "concurrency": 5,            # moderate concurrency, no dominant bottleneck
+            "request_rate_per_sec": 2,
+            "bandwidth_cap_mbps": 1000,
+            "injected_latency_ms": 0,    # đổi 1 → 0: baseline nghĩa là KHÔNG inject gì
+            "duration_sec": 60,          # ← sửa từ 5s
+            "total_requests": 50,        # ← override, không tính từ duration×rate
+            "replicates": 3,             # 3 independent runs, mỗi run 50 reqs
+            "refinement_time_cap_sec": 0.02, 
+            "expected_bottleneck": None,
         },
-        # Temporarily disabled due to BytesIO issues
+        {
+            "name": "Vary-Concurrency",
+            "input_size_mb": 5,
+            "concurrency": [1, 5, 10, 20],   # bỏ 50 — quá cao cho 4-node
+            "request_rate_per_sec": 1,
+            "bandwidth_cap_mbps": 1000,
+            "injected_latency_ms": 0,        # đổi 1 → 0: không muốn network confound
+            "duration_sec": 90,
+            "total_requests": 50,
+            "replicates": 3,
+            "refinement_time_cap_sec": 0.02,
+            "expected_bottleneck": "Compute contention",
+        },
         {
             "name": "Vary-Input",
-            "input_size_mb": [5, 10, 15, 20],  # VARIES: 5MB to 50MB
-            "concurrency": 1,      # Fixed baseline
-            "request_rate_per_sec": 1,  # Fixed baseline
-            "bandwidth_cap_mbps": 1000,  # No cap
-            "injected_latency_ms": 1,
-            "duration_sec": 10,  # Fixed baseline
-            "replicates": 1,
-            "refinement_time_cap_sec": 0.02,
-            "expected_bottleneck": "Network (bandwidth/transfer)"
+            "input_size_mb": [1, 5, 10, 20],  # bỏ 15 và 50
+            "concurrency": 1,
+            "request_rate_per_sec": 1, 
+            "bandwidth_cap_mbps": 50,          # đổi 1000 → 50: 50Mbps tạo bottleneck rõ với 10–20MB input
+            "injected_latency_ms": 30,         # đổi 10 → 30: đủ để classifier phân biệt với CPU
+            "duration_sec": 120,
+            "total_requests": 30,
+            "replicates": 3,
+            "refinement_time_cap_sec": 0.05,   # tăng 0.02 → 0.05: tăng vì latency cao hơn
+            "expected_bottleneck": "Network (bandwidth/transfer)",
         },
-        # {
-        #     "name": "Vary-Concurrency",
-        #     "input_size_mb": 5,  # Fixed baseline
-        #     "concurrency": [1, 5, 10, 20], #, 50],  # VARIES: 1, 20, 100
-        #     "request_rate_per_sec": 1,  # Fixed baseline
-        #     "bandwidth_cap_mbps": 1000,  # No cap
-        #     "injected_latency_ms": 1,
-        #     "duration_sec": 10,  # Extended for higher concurrency
-        #     "replicates": 1,
-        #     "refinement_time_cap_sec": 0.02,
-        #     "expected_bottleneck": "Compute / contention (queues)"
-        # },
         {
             "name": "Vary-FiringRate",
-            "input_size_mb": 5,  # Fixed baseline
-            "concurrency": 5,      # Fixed moderate level
-            "request_rate_per_sec": [5, 10, ], #20], # 30], # 100, 200],  # VARIES: 1, 50, 200 req/s
-            "bandwidth_cap_mbps": 1000,  # No cap
-            "injected_latency_ms": 1,
-            "duration_sec": 5,  # Extended for higher rates
-            "replicates": 1,
+            "input_size_mb": 5,
+            "concurrency": 5,
+            "request_rate_per_sec": [1, 2, 5, 10, 20],  # ← bỏ 100-200
+            "bandwidth_cap_mbps": 1000,
+            "injected_latency_ms": 0,
+            "duration_sec": 60,
+            "total_requests": 100,
+            "replicates": 3,
             "refinement_time_cap_sec": 0.02,
-            "expected_bottleneck": "Queueing / compute contention"
+            "expected_bottleneck": "Queueing + compute",
         },
-        # {
-        #     "name": "Small-Msgs",
-        #     "input_size_mb": [0.01, 0.05, 0.1, 0.5, 1],  # VARIES: 10KB, 100KB, 1MB
-        #     "concurrency": 50,     # Fixed high level
-        #     "request_rate_per_sec": 100,  # Fixed high rate
-        #     "bandwidth_cap_mbps": 1000,  # No cap
-        #     "injected_latency_ms": 1,
-        #     "duration_sec": 10,  # Fixed duration
-        #     "replicates": 1,
-        #     "refinement_time_cap_sec": 0.02,
-        #     "expected_bottleneck": "Network (latency)"
-        # },
-        # {
-        #     "name": "Burst-Spike",
-        #     "input_size_mb": 2,  # Moderate size for better testing
-        #     "concurrency": [5, 10, 20],  # VARIES: baseline 5 → spike 20
-        #     "request_rate_per_sec": [2, 20],  # VARIES: baseline 2 → spike 50 req/s
-        #     "bandwidth_cap_mbps": 1000,  # No cap
-        #     "injected_latency_ms": 1,
-        #     "duration_sec": 15,  # Fixed duration
-        #     "replicates": 1,
-        #     "refinement_time_cap_sec": 0.02,
-        #     "expected_bottleneck": "Queueing / transient network"
-        # }
+        {
+            "name": "Small-Msgs",
+            "input_size_mb": 0.1,
+            "concurrency": 20,
+            "request_rate_per_sec": [20, 50, 80],  # ba mức high-rate
+            "bandwidth_cap_mbps": 1000,
+            "injected_latency_ms": 5,              # thêm 5ms: đủ để thấy per-request overhead tích lũy
+            "duration_sec": 60,                     
+            "total_requests": 1200,                # dùng riêng cho mỗi cấu hình
+            "replicates": 3,
+            "refinement_time_cap_sec": 0.02,
+            "expected_bottleneck": "Network (per-request overhead, queuing)",
+        },
+        {
+            "name": "Burst-Spike",
+            "input_size_mb": 2,
+            "concurrency": [5, 20],          # baseline 5, spike 20
+            "request_rate_per_sec": [2, 20], # baseline 2, spike 20
+            "bandwidth_cap_mbps": 1000,
+            "injected_latency_ms": 0,
+            "duration_sec": 60,
+            "total_requests": 60,            # 45 baseline + 15 spike
+            "replicates": 3,
+            "refinement_time_cap_sec": 0.02,
+            "expected_bottleneck": "Transient queuing",
+        },
     ]
+
     # Optional filtering by scenario name(s)
     if scenario_names:
         def _norm(name: str) -> str:
@@ -1961,11 +2347,17 @@ def create_scenario_configs(
     for scheduler in schedulers:
         for scenario in scenarios:
             # Handle scenarios with varying parameters (lists) vs fixed parameters (single values)
-            varying_params = {}
-            fixed_params = {}
+            # varying_params = {}
+            # fixed_params = {}
+            varying_params: dict[str, list] = {}
+            fixed_params: dict[str, Any] = {}
             
             # Identify which parameters vary and which are fixed
             for param_name, param_value in scenario.items():
+                if param_name in ["name", "expected_bottleneck"]:
+                    fixed_params[param_name] = param_value
+                    continue
+                
                 if isinstance(param_value, list):
                     # Special case for burst-spike: request_rate_per_sec list represents [baseline, spike] rates
                     if scenario["name"] == "Burst-Spike" and param_name == "request_rate_per_sec":
@@ -1989,13 +2381,23 @@ def create_scenario_configs(
 def _create_single_experiment_config(scenario: dict, scheduler: str, configs: list):
     """Create a single experiment configuration for scenarios with fixed parameters"""
     # For burst scenario, handle rate as [baseline, spike] pair
-    if scenario["name"] == "Burst-Spike" and isinstance(scenario["request_rate_per_sec"], list):
+    # if scenario["name"] == "Burst-Spike" and isinstance(scenario["request_rate_per_sec"], list):
+    #     baseline_rate, spike_rate = scenario["request_rate_per_sec"]
+    #     baseline_requests = int((scenario["duration_sec"] - 5) * baseline_rate)  # baseline for most time
+    #     spike_requests = int(5 * spike_rate)  # spike for final 5s
+    #     total_requests = baseline_requests + spike_requests
+    # else:
+    #     # Calculate total requests based on duration and request rate
+    #     total_requests = int(scenario["duration_sec"] * scenario["request_rate_per_sec"])
+
+    if "total_requests" in scenario and scenario["total_requests"] is not None:
+        total_requests = int(scenario["total_requests"])
+    elif scenario["name"] == "Burst-Spike" and isinstance(scenario["request_rate_per_sec"], list):
         baseline_rate, spike_rate = scenario["request_rate_per_sec"]
-        baseline_requests = int((scenario["duration_sec"] - 5) * baseline_rate)  # baseline for most time
-        spike_requests = int(5 * spike_rate)  # spike for final 5s
+        baseline_requests = int((scenario["duration_sec"] - 5) * baseline_rate)
+        spike_requests = int(5 * spike_rate)
         total_requests = baseline_requests + spike_requests
     else:
-        # Calculate total requests based on duration and request rate
         total_requests = int(scenario["duration_sec"] * scenario["request_rate_per_sec"])
     
     # Determine input file based on size
@@ -2013,7 +2415,8 @@ def _create_single_experiment_config(scenario: dict, scheduler: str, configs: li
         # Handle request_rate_per_sec for Burst-Spike scenario (convert list to representative value)
         if scenario["name"] == "Burst-Spike" and isinstance(scenario["request_rate_per_sec"], list):
             # Use the spike rate as the representative rate for the experiment config
-            representative_rate = max(scenario["request_rate_per_sec"])
+            # representative_rate = max(scenario["request_rate_per_sec"])
+            representative_rate = scenario["request_rate_per_sec"]
         else:
             representative_rate = scenario["request_rate_per_sec"]
         
@@ -2054,14 +2457,24 @@ def _create_varying_experiment_configs(scenario: dict, scheduler: str, configs: 
         
         # Calculate total requests based on duration and request rate
         # Handle special case for Burst-Spike where request_rate_per_sec is a list [baseline, spike]
-        if scenario["name"] == "Burst-Spike" and isinstance(current_scenario["request_rate_per_sec"], list):
-            # For burst scenario, use a more realistic total requests calculation
+        # if scenario["name"] == "Burst-Spike" and isinstance(current_scenario["request_rate_per_sec"], list):
+        #     # For burst scenario, use a more realistic total requests calculation
+        #     baseline_rate, spike_rate = current_scenario["request_rate_per_sec"]
+        #     baseline_requests = int((current_scenario["duration_sec"] - 5) * baseline_rate)
+        #     spike_requests = int(5 * spike_rate)
+        #     total_requests = baseline_requests + spike_requests
+        # else:
+        #     # Normal calculation for other scenarios
+        #     total_requests = int(current_scenario["duration_sec"] * current_scenario["request_rate_per_sec"])
+
+        if "total_requests" in current_scenario and current_scenario["total_requests"] is not None:
+            total_requests = int(current_scenario["total_requests"])
+        elif scenario["name"] == "Burst-Spike" and isinstance(current_scenario["request_rate_per_sec"], list):
             baseline_rate, spike_rate = current_scenario["request_rate_per_sec"]
             baseline_requests = int((current_scenario["duration_sec"] - 5) * baseline_rate)
             spike_requests = int(5 * spike_rate)
             total_requests = baseline_requests + spike_requests
         else:
-            # Normal calculation for other scenarios
             total_requests = int(current_scenario["duration_sec"] * current_scenario["request_rate_per_sec"])
         
         # Determine input file based on size
@@ -2074,7 +2487,8 @@ def _create_varying_experiment_configs(scenario: dict, scheduler: str, configs: 
         # Handle request_rate_per_sec for Burst-Spike scenario (convert list to representative value)
         if scenario["name"] == "Burst-Spike" and isinstance(current_scenario["request_rate_per_sec"], list):
             # Use the spike rate as the representative rate for the experiment config
-            representative_rate = max(current_scenario["request_rate_per_sec"])
+            # representative_rate = max(current_scenario["request_rate_per_sec"])
+            representative_rate = current_scenario["request_rate_per_sec"]
         else:
             representative_rate = current_scenario["request_rate_per_sec"]
         
@@ -2104,18 +2518,25 @@ def _get_input_file_for_size(size_mb: float) -> str:
         return "data/test_50mb.png"
     elif size_mb >= 20:
         return "data/test_20mb.png"
+    elif size_mb >= 10:
+        return "data/test_10mb.png"
     elif size_mb >= 5:
         return "data/test_5mb.png"
     elif size_mb >= 2:
         return "data/test_2mb.png"
     elif size_mb >= 1:
         return "data/test_1mb.png"
+    elif size_mb >= 0.5:
+        return "data/test_500kb.png"
+    elif size_mb >= 0.2:
+        return "data/test_200kb.png"
     elif size_mb >= 0.1:
         return "data/test_100kb.png"
-    elif size_mb <= 0.01:
+    elif size_mb >= 0.01:
         return "data/test_10kb.png"
     else:
-        return "data/test.png"  # Default
+        # return "data/test.png"  # Default
+        raise ValueError(f"No input file mapping for size_mb={size_mb}")
 
 
 def main():
@@ -2186,7 +2607,7 @@ def main():
         configs = create_experiment_configs(
             input_sizes=input_sizes,
             concurrency_levels=concurrency_levels,
-            schedulers=["ours", "FaasPRS", "ditto", "palette"], # "ours", "FaasPRS", "ditto"
+            schedulers=["ours", "FaasPRS", "palette"], # "ours", "FaasPRS", "ditto"
             requests_per_experiment=10
         )
         print(f"   - Input sizes (MB): {input_sizes}")
@@ -2203,7 +2624,7 @@ def main():
         # Create test images for scenarios
         create_scenario_test_images()
         configs = create_scenario_configs(
-            schedulers=["ours", "FaasPRS"], #"palette", ], #"ditto"],
+            schedulers=["ours", "FaasPRS", "palette"], #"ditto"],
             scenario_names=scenario_filter,
         )
         if scenario_filter:
